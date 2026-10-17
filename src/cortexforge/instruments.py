@@ -513,6 +513,84 @@ def score_dual_nback(trials: list[dict]) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# PennCNB-style composite scoring (accuracy / speed / efficiency)
+# ---------------------------------------------------------------------------
+
+def penncnb_composite(accuracy: float, median_rt_ms: float,
+                      ref_acc_mean: float, ref_acc_sd: float,
+                      ref_rt_mean: float, ref_rt_sd: float) -> dict:
+    """Penn Computerized Neurocognitive Battery composite scoring.
+
+    The PennCNB architecture is the most reusable scoring model in the
+    literature: raw accuracy and speed are each converted to z-scores, the
+    speed z is sign-flipped so that faster is better, and efficiency is the
+    mean of the two. This yields three comparable indices per task, which
+    lets a system compare a learner across tasks with different natural
+    scales.
+
+    Reference means and SDs must be supplied by the caller (the dossier
+    tabulates them for the ten PennCNB tests); passing the learner's own
+    baseline is acceptable for within-person tracking but must not be
+    presented as a norm.
+    """
+    if ref_acc_sd <= 0 or ref_rt_sd <= 0:
+        raise ValueError("reference SDs must be positive")
+    z_acc = (accuracy - ref_acc_mean) / ref_acc_sd
+    z_speed = -((median_rt_ms - ref_rt_mean) / ref_rt_sd)
+    return {
+        "z_accuracy": round(z_acc, 3),
+        "z_speed": round(z_speed, 3),
+        "efficiency": round((z_acc + z_speed) / 2.0, 3),
+        "note": ("Efficiency is the mean of the accuracy z and the sign-flipped "
+                 "speed z. Reference values are supplied by the caller; if they "
+                 "are the learner's own baseline this is a within-person index, "
+                 "not a norm-referenced score."),
+    }
+
+
+def nih_toolbox_two_vector(correct: int, total: int,
+                           median_rt_ms: float | None = None,
+                           rt_floor_ms: float = 200.0,
+                           rt_ceiling_ms: float = 3000.0) -> dict:
+    """NIH Toolbox two-vector scoring for accuracy-and-speed tasks.
+
+    The Toolbox scores accuracy and reaction time on separate 0-5 vectors and
+    sums them to a 0-10 total, with one important rule: if accuracy is at or
+    below 80%, the total is the accuracy vector alone, because speed is not
+    interpretable when the learner is not getting the items right. This is a
+    direct implementation of that rule.
+
+    The accuracy vector is 0.125 x number correct, capped at 5 (so 40 correct
+    responses saturate it). The RT vector is a linear rescale of median RT
+    from the ceiling (0 points) to the floor (5 points).
+    """
+    if total <= 0:
+        raise ValueError("total must be positive")
+    accuracy = correct / total
+    acc_vector = min(5.0, 0.125 * correct)
+    if median_rt_ms is None:
+        rt_vector = 0.0
+    else:
+        span = max(rt_ceiling_ms - rt_floor_ms, 1.0)
+        frac = (rt_ceiling_ms - median_rt_ms) / span
+        rt_vector = max(0.0, min(5.0, 5.0 * frac))
+    if accuracy <= 0.80:
+        total_score = acc_vector
+        rule = ("accuracy <= 80%: total is the accuracy vector alone, because "
+                "speed is not interpretable below this accuracy")
+    else:
+        total_score = acc_vector + rt_vector
+        rule = "accuracy > 80%: total is accuracy vector + RT vector"
+    return {
+        "accuracy": round(accuracy, 3),
+        "accuracy_vector": round(acc_vector, 3),
+        "rt_vector": round(rt_vector, 3),
+        "total_0_10": round(total_score, 3),
+        "rule_applied": rule,
+    }
+
+
 def score_bart(trials: list[dict]) -> dict:
     """trials: [{'pumps': int, 'burst': bool, 'banked': bool, 'points': int}]"""
     adj = [t["pumps"] for t in trials if not t.get("burst")]
@@ -707,6 +785,77 @@ def score_nfc(items: list[int]) -> dict:
 
 def score_decision_style(items: dict[str, list[int]]) -> dict:
     return {k: round(statistics.mean(v), 2) for k, v in items.items() if v}
+
+
+def divergence_signal(subjective: float | None, objective: float | None,
+                      subjective_scale_max: float = 4.0) -> dict:
+    """Compare self-reported fog against measured performance.
+
+    Self-reported brain fog correlates only weakly with objective
+    neuropsychological performance (roughly 0.1 SD across 25,796 participants;
+    Jennings et al. 2023). The two must therefore never be composited into a
+    single "cognitive health" number. But the *divergence* between them is
+    itself informative, and there are three distinct states a learner can be
+    in, each calling for a different response:
+
+        both impaired   -> the problem is real and measurable; reduce load
+        subjective only -> the learner feels worse than they perform; this is
+                           the most common post-viral pattern, and the honest
+                           response is to show them the objective data rather
+                           than to treat a perception as a deficit
+        objective only  -> performance has dropped without the learner noticing;
+                           this is the dangerous case, because they will not
+                           self-refer
+
+    Returns a state label plus the interpretation, and never a merged score.
+    """
+    if subjective is None or objective is None:
+        return {
+            "state": "insufficient_data",
+            "interpretation": ("Both a subjective clarity rating and an objective "
+                               "performance measure are needed to compare them."),
+        }
+
+    subj_norm = max(0.0, min(1.0, subjective / max(subjective_scale_max, 1e-9)))
+    obj_norm = max(0.0, min(1.0, objective))
+
+    # Thresholds: subjective >= 0.5 on the normalised scale is "reported fog";
+    # objective below 0.6 of the learner's own baseline band is "measured drop".
+    subj_bad = subj_norm >= 0.5
+    obj_bad = obj_norm < 0.6
+
+    if subj_bad and obj_bad:
+        state = "concordant_impairment"
+        interp = ("You report difficulty and your measured performance is also "
+                  "below your baseline. Both signals agree, so the load in this "
+                  "system will be reduced until the trend reverses.")
+    elif subj_bad and not obj_bad:
+        state = "subjective_only"
+        interp = ("You report more difficulty than your measured performance "
+                  "shows. This pattern is common after viral illness and is not "
+                  "evidence that your ability has dropped. The objective trend "
+                  "is the one to watch; the feeling is real but it is not a "
+                  "measurement of capacity.")
+    elif not subj_bad and obj_bad:
+        state = "objective_only"
+        interp = ("Your measured performance is below your baseline but you are "
+                  "not reporting difficulty. This is the pattern worth acting on "
+                  "first, because it will not prompt you to seek help on its own.")
+    else:
+        state = "concordant_healthy"
+        interp = ("Your reported clarity and your measured performance agree, "
+                  "and both are within your normal range.")
+
+    return {
+        "state": state,
+        "subjective_normalised": round(subj_norm, 3),
+        "objective_normalised": round(obj_norm, 3),
+        "divergence": round(subj_norm - obj_norm, 3),
+        "interpretation": interp,
+        "note": ("These are reported separately and are never averaged into a "
+                 "single score. Subjective and objective measures of cognition "
+                 "diverge, and the divergence is the useful signal."),
+    }
 
 
 def _ols_slope(xs: list[float], ys: list[float]) -> float | None:

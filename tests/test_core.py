@@ -12,11 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from cortexforge.instruments import (  # noqa: E402
     EVIDENCE_MODERATE, EVIDENCE_STRONG, LICENCE_CLINICAL, LICENCE_RESTRICTED,
-    REGISTRY, score_task, servable_tasks, task_manifest, validate_registry,
+    REGISTRY, divergence_signal, nih_toolbox_two_vector, penncnb_composite,
+    score_task, servable_tasks, task_manifest, validate_registry,
 )
 from cortexforge.mcp import (  # noqa: E402
-    AUTH_API_KEY, AUTH_LOCAL, AUTH_NONE, AUTH_OAUTH, CATALOGUE, build_mcp_config,
-    core_servers, oauth_servers, onboarding_plan, token_status, write_mcp_config,
+    AUTH_API_KEY, AUTH_LOCAL, AUTH_NONE, AUTH_OAUTH, CATALOGUE, CORE_EXCLUSIONS,
+    CORE_KEYS, build_mcp_config, core_servers, oauth_servers, onboarding_plan,
+    token_status, write_mcp_config,
 )
 from cortexforge.onboarding import (  # noqa: E402
     PROBES, PROBES_BY_ID, LearningContract, Onboarding,
@@ -708,6 +710,104 @@ class TestInstruments(unittest.TestCase):
         self.assertIsNone(out["interference_cost_ms"])
 
 
+class TestCompositeScoring(unittest.TestCase):
+    """PennCNB efficiency and NIH Toolbox two-vector scoring."""
+
+    def test_penncnb_efficiency_is_mean_of_z_scores(self):
+        out = penncnb_composite(accuracy=0.9, median_rt_ms=500.0,
+                                ref_acc_mean=0.8, ref_acc_sd=0.1,
+                                ref_rt_mean=600.0, ref_rt_sd=100.0)
+        # z_acc = (0.9-0.8)/0.1 = 1.0 ; z_speed = -((500-600)/100) = 1.0
+        self.assertAlmostEqual(out["z_accuracy"], 1.0, places=3)
+        self.assertAlmostEqual(out["z_speed"], 1.0, places=3)
+        self.assertAlmostEqual(out["efficiency"], 1.0, places=3)
+
+    def test_penncnb_faster_is_better(self):
+        fast = penncnb_composite(0.8, 400.0, 0.8, 0.1, 600.0, 100.0)
+        slow = penncnb_composite(0.8, 800.0, 0.8, 0.1, 600.0, 100.0)
+        self.assertGreater(fast["z_speed"], slow["z_speed"])
+        self.assertGreater(fast["efficiency"], slow["efficiency"])
+
+    def test_penncnb_rejects_bad_sd(self):
+        with self.assertRaises(ValueError):
+            penncnb_composite(0.8, 500.0, 0.8, 0.0, 600.0, 100.0)
+
+    def test_penncnb_flags_within_person_use(self):
+        out = penncnb_composite(0.8, 500.0, 0.8, 0.1, 600.0, 100.0)
+        self.assertIn("within-person", out["note"])
+
+    def test_nih_accuracy_vector_formula(self):
+        out = nih_toolbox_two_vector(correct=20, total=20, median_rt_ms=500.0)
+        # 0.125 * 20 = 2.5
+        self.assertAlmostEqual(out["accuracy_vector"], 2.5, places=3)
+
+    def test_nih_accuracy_vector_saturates(self):
+        out = nih_toolbox_two_vector(correct=100, total=100, median_rt_ms=500.0)
+        self.assertAlmostEqual(out["accuracy_vector"], 5.0, places=3)
+
+    def test_nih_low_accuracy_uses_accuracy_only(self):
+        """The load-bearing rule: below 80% accuracy, speed is not scored."""
+        out = nih_toolbox_two_vector(correct=10, total=20, median_rt_ms=300.0)
+        self.assertAlmostEqual(out["total_0_10"], out["accuracy_vector"], places=3)
+        self.assertIn("<= 80%", out["rule_applied"])
+
+    def test_nih_high_accuracy_adds_rt_vector(self):
+        out = nih_toolbox_two_vector(correct=18, total=20, median_rt_ms=300.0)
+        self.assertAlmostEqual(out["total_0_10"],
+                               out["accuracy_vector"] + out["rt_vector"], places=3)
+        self.assertIn("> 80%", out["rule_applied"])
+
+    def test_nih_rt_vector_bounds(self):
+        fast = nih_toolbox_two_vector(18, 20, median_rt_ms=100.0)
+        slow = nih_toolbox_two_vector(18, 20, median_rt_ms=5000.0)
+        self.assertAlmostEqual(fast["rt_vector"], 5.0, places=3)
+        self.assertAlmostEqual(slow["rt_vector"], 0.0, places=3)
+
+    def test_nih_rejects_zero_total(self):
+        with self.assertRaises(ValueError):
+            nih_toolbox_two_vector(0, 0)
+
+
+class TestDivergenceSignal(unittest.TestCase):
+    """Subjective vs objective cognition must never be composited."""
+
+    def test_insufficient_data(self):
+        self.assertEqual(divergence_signal(None, 0.8)["state"], "insufficient_data")
+        self.assertEqual(divergence_signal(2.0, None)["state"], "insufficient_data")
+
+    def test_concordant_impairment(self):
+        out = divergence_signal(subjective=3.5, objective=0.3)
+        self.assertEqual(out["state"], "concordant_impairment")
+
+    def test_subjective_only(self):
+        """The common post-viral pattern: feels worse than they perform."""
+        out = divergence_signal(subjective=3.5, objective=0.9)
+        self.assertEqual(out["state"], "subjective_only")
+        self.assertIn("not evidence", out["interpretation"])
+
+    def test_objective_only(self):
+        """The dangerous case: performance dropped without the learner noticing."""
+        out = divergence_signal(subjective=0.5, objective=0.3)
+        self.assertEqual(out["state"], "objective_only")
+        self.assertIn("will not prompt you", out["interpretation"])
+
+    def test_concordant_healthy(self):
+        out = divergence_signal(subjective=0.5, objective=0.9)
+        self.assertEqual(out["state"], "concordant_healthy")
+
+    def test_never_returns_a_merged_score(self):
+        out = divergence_signal(2.0, 0.8)
+        self.assertNotIn("composite", out)
+        self.assertNotIn("score", out)
+        self.assertIn("never averaged", out["note"])
+
+    def test_no_clinical_language(self):
+        for s, o in [(3.5, 0.3), (3.5, 0.9), (0.5, 0.3), (0.5, 0.9)]:
+            text = divergence_signal(s, o)["interpretation"].lower()
+            for pat in ("disorder", "diagnos", "symptom", "deficit", "patient"):
+                self.assertNotIn(pat, text)
+
+
 # ----------------------------------------------------------------- profile
 
 class TestProfile(unittest.TestCase):
@@ -994,8 +1094,14 @@ class TestMCP(unittest.TestCase):
     def test_stdio_entry_uses_env_reference(self):
         cfg = build_mcp_config(["obsidian"])
         entry = cfg["mcpServers"]["obsidian"]
-        self.assertEqual(entry["command"], "uvx")
-        self.assertEqual(entry["env"]["OBSIDIAN_API_KEY"], "${OBSIDIAN_API_KEY}")
+        self.assertEqual(entry["command"], "npx")
+        self.assertEqual(entry["env"]["OBSIDIAN_VAULT_PATH"],
+                         "${OBSIDIAN_VAULT_PATH}")
+
+    def test_api_key_entry_uses_env_reference(self):
+        cfg = build_mcp_config(["brave_search"])
+        entry = cfg["mcpServers"]["brave_search"]
+        self.assertEqual(entry["env"]["BRAVE_API_KEY"], "${BRAVE_API_KEY}")
 
     def test_unknown_key_skipped(self):
         cfg = build_mcp_config(["notion", "does_not_exist"])
@@ -1047,6 +1153,44 @@ class TestMCP(unittest.TestCase):
             if s.transport == "stdio":
                 self.assertTrue(s.target, s.key)
                 self.assertIsInstance(s.args, list)
+
+    def test_obsidian_default_needs_no_plugin(self):
+        """The default Obsidian server must work on raw Markdown."""
+        obs = next(s for s in CATALOGUE if s.key == "obsidian")
+        self.assertEqual(obs.transport, "stdio")
+        self.assertIn("obsidian-mcp", " ".join(obs.args))
+        self.assertNotIn("OBSIDIAN_API_KEY", obs.env_keys)
+        self.assertIn("no", obs.notes.lower())
+
+    def test_obsidian_rest_variant_documented_as_plugin_requiring(self):
+        rest = next(s for s in CATALOGUE if s.key == "obsidian_rest")
+        self.assertIn("plugin", rest.notes.lower())
+
+    def test_anki_is_sse_on_localhost(self):
+        anki = next(s for s in CATALOGUE if s.key == "anki")
+        self.assertEqual(anki.transport, "sse")
+        self.assertIn("localhost", anki.target)
+
+    def test_wolfram_excluded_from_oauth_only_core(self):
+        from cortexforge.mcp import CORE_EXCLUSIONS
+        self.assertIn("wolfram", CORE_EXCLUSIONS)
+        self.assertNotIn("wolfram", CORE_KEYS)
+
+    def test_core_exclusions_document_missing_servers(self):
+        from cortexforge.mcp import CORE_EXCLUSIONS
+        for key in ("coursera", "khan_academy", "duolingo"):
+            self.assertIn(key, CORE_EXCLUSIONS)
+
+    def test_every_core_server_is_oauth_or_no_auth(self):
+        """The user's constraint: only OAuth should remain for the learner."""
+        for s in core_servers():
+            self.assertIn(s.auth, (AUTH_NONE, AUTH_LOCAL, AUTH_OAUTH),
+                          f"{s.key} needs an API key and cannot be OAuth-only")
+
+    def test_notes_present_on_servers_with_caveats(self):
+        for key in ("obsidian", "obsidian_rest", "anki", "wolfram"):
+            spec = next(s for s in CATALOGUE if s.key == key)
+            self.assertTrue(spec.notes, f"{key} should document its caveat")
 
 
 if __name__ == "__main__":

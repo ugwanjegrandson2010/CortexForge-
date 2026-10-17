@@ -302,8 +302,18 @@ the basis is a single task.
 **FR-7.7** Infer a study shape (Overconfident self-assessor, Broad but
 shallow, Under-reviewing, Backlogged, Steady) from the learner's own metrics.
 
-**FR-7.8** Always emit the limits list, including "Behaviour measured in a
-game is a sample of behaviour, not a summary of a person."
+**FR-7.9** Provide PennCNB-style composite scoring: raw accuracy and speed
+converted to z-scores, the speed z sign-flipped, and efficiency as the mean of
+the two. This is the most reusable scoring architecture in the literature
+because it makes tasks with different natural scales comparable. When the
+reference values are the learner's own baseline, the result must be labelled a
+within-person index and never presented as a norm.
+
+**FR-7.10** Provide NIH Toolbox two-vector scoring for accuracy-and-speed
+tasks: accuracy and RT each scored 0–5 and summed to 0–10, with the Toolbox's
+own rule that **below 80% accuracy the total is the accuracy vector alone**,
+because speed is not interpretable when the learner is not getting the items
+right.
 
 ### 5.8 Cognitive-decline and brain-fog protocol (G5)
 
@@ -312,8 +322,27 @@ word, following a conversation, remembering why, rereading) at baseline and
 longitudinally.
 
 **FR-8.2** Track objective performance separately, and report the two
-separately. Self-reported fog correlates weakly with test performance; a system
-that conflates them is lying to the learner.
+separately. Self-reported fog correlates weakly with test performance
+(approximately 0.1 SD across 25,796 participants; Jennings et al. 2023); a
+system that conflates them is lying to the learner.
+
+**FR-8.2a** Surface the *divergence* between subjective and objective as its
+own signal, because the divergence is informative and the two must never be
+averaged. `divergence_signal()` returns one of four states:
+
+| State | Pattern | Response |
+|---|---|---|
+| `concordant_impairment` | reports difficulty, performance also down | reduce load until the trend reverses |
+| `subjective_only` | reports difficulty, performance intact | show the objective data; the feeling is real but is not a measurement of capacity |
+| `objective_only` | performance down, no complaint | act first — this will not prompt self-referral |
+| `concordant_healthy` | both within range | continue |
+
+**FR-8.2b** The system must never emit a merged "cognitive health" score.
+
+**FR-8.2c** State plainly that home-based cognitive training was found
+*ineffective* in the Lampit et al. meta-analysis, and that the interventions
+with the largest measured effects on cognition are physical activity and sleep
+— which this system logs as covariates rather than pretending to replace.
 
 **FR-8.3** Protocol rules grounded in the dose-response evidence:
 
