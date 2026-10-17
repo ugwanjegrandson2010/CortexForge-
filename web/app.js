@@ -288,6 +288,19 @@ document.querySelectorAll('.nav-item').forEach(item => {
   });
 });
 
+// Mobile bottom tabs
+document.querySelectorAll('.bottom-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.bottom-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    const viewName = 'view-' + tab.dataset.view;
+    const viewEl = $(viewName);
+    if (viewEl) viewEl.classList.add('active');
+  });
+});
+
 /* --------------------------------------------------------------- boot */
 
 async function boot() {
