@@ -156,20 +156,45 @@ async function nextProbe() {
       return out;
     };
   } else if (p.kind === 'task') {
-    const ta = el('textarea', {
-      attrs: { rows: '4', placeholder: 'Paste the trial data as JSON, or type "skip"…' }
-    });
-    inputWrap.appendChild(el('p', {
-      class: 'lede',
-      text: 'Task: ' + (p.task_id || '') + '. In the packaged app this runs in-canvas; '
-        + 'here, paste the trial array as JSON (or skip).'
-    }));
-    inputWrap.appendChild(ta);
-    getAnswer = () => {
-      const raw = ta.value.trim();
-      if (!raw || raw === 'skip') return null;
-      try { return { trials: JSON.parse(raw) }; } catch (e) { return null; }
-    };
+    if (typeof TaskEngine !== 'undefined' && TaskEngine.has(p.task_id)) {
+      inputWrap.appendChild(el('p', {
+        class: 'lede',
+        text: 'This task runs in your browser. Click "Start task" to begin.'
+      }));
+      const startBtn = el('button', { class: 'primary', text: 'Start task' });
+      inputWrap.appendChild(startBtn);
+      let taskResult = null;
+      startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        try {
+          const trials = await TaskEngine.run(p.task_id, inputWrap, { trials: p.trials || 40 });
+          taskResult = { trials: trials };
+          inputWrap.appendChild(el('p', {
+            class: 'lede',
+            text: 'Task complete. ' + trials.length + ' trials recorded.'
+          }));
+        } catch (e) {
+          inputWrap.appendChild(el('p', { class: 'lede', text: 'Task error: ' + e.message }));
+          startBtn.disabled = false;
+        }
+      });
+      getAnswer = () => taskResult;
+    } else {
+      const ta = el('textarea', {
+        attrs: { rows: '4', placeholder: 'Paste the trial data as JSON, or type "skip"…' }
+      });
+      inputWrap.appendChild(el('p', {
+        class: 'lede',
+        text: 'Task: ' + (p.task_id || '') + '. No in-canvas renderer available. '
+          + 'Paste the trial array as JSON (or skip).'
+      }));
+      inputWrap.appendChild(ta);
+      getAnswer = () => {
+        const raw = ta.value.trim();
+        if (!raw || raw === 'skip') return null;
+        try { return { trials: JSON.parse(raw) }; } catch (e) { return null; }
+      };
+    }
   }
 
   card.appendChild(inputWrap);

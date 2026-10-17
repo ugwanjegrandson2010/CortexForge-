@@ -772,9 +772,14 @@ def score_svo(trials: list[dict]) -> dict:
     }
 
 
-def score_ucla(items: list[int]) -> dict:
-    total = sum(items)
-    return {"ucla_total": total, "n": len(items),
+def score_ucla(items: list[int] | list[dict]) -> dict:
+    """Accept both list[int] and [{'score': int}, ...] formats."""
+    if items and isinstance(items[0], dict):
+        scores = [t["score"] for t in items]
+    else:
+        scores = items
+    total = sum(scores)
+    return {"ucla_total": total, "n": len(scores),
             "band": ("low" if total < 28 else "moderate" if total < 44
                      else "high")}
 
@@ -893,6 +898,29 @@ def _norm_ppf(p: float) -> float:
            (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
 
 
+def score_pattern_comparison(trials: list[dict]) -> dict:
+    """trials: [{'correct': bool}] — fixed 90-second window."""
+    n = len(trials)
+    correct = sum(1 for t in trials if t.get("correct"))
+    return {
+        "correct_in_window": correct,
+        "accuracy": round(correct / n, 3) if n else None,
+        "n": n,
+    }
+
+
+def score_false_belief(trials: list[dict]) -> dict:
+    """trials: [{'correct': bool, 'order': 'first'|'second'}]."""
+    second_order = [t for t in trials if t.get("order") == "second"]
+    if not second_order:
+        return {"second_order_accuracy": None, "n": 0}
+    correct = sum(1 for t in second_order if t.get("correct"))
+    return {
+        "second_order_accuracy": round(correct / len(second_order), 3),
+        "n": len(second_order),
+    }
+
+
 SCORERS: dict[str, Callable] = {
     "flanker": score_flanker,
     "dccs": score_dccs,
@@ -908,6 +936,8 @@ SCORERS: dict[str, Callable] = {
     "loneliness_ucla": score_ucla,
     "need_for_cognition": score_nfc,
     "decision_style": score_decision_style,
+    "pattern_comparison": score_pattern_comparison,
+    "false_belief": score_false_belief,
 }
 
 

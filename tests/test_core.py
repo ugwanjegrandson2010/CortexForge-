@@ -762,6 +762,43 @@ class TestInstruments(unittest.TestCase):
         self.assertEqual(score_task("loneliness_ucla", [1] * 20)["band"], "low")
         self.assertEqual(score_task("loneliness_ucla", [4] * 20)["band"], "high")
 
+    def test_pattern_comparison_scorer(self):
+        trials = [{"correct": True}] * 70 + [{"correct": False}] * 20
+        out = score_task("pattern_comparison", trials)
+        self.assertEqual(out["correct_in_window"], 70)
+        self.assertAlmostEqual(out["accuracy"], 0.778, places=2)
+        self.assertEqual(out["n"], 90)
+
+    def test_pattern_comparison_empty(self):
+        out = score_task("pattern_comparison", [])
+        self.assertEqual(out["correct_in_window"], 0)
+        self.assertIsNone(out["accuracy"])
+
+    def test_false_belief_scorer(self):
+        trials = ([{"correct": True, "order": "second"}] * 6 +
+                  [{"correct": False, "order": "second"}] * 2 +
+                  [{"correct": True, "order": "first"}] * 2)
+        out = score_task("false_belief", trials)
+        self.assertAlmostEqual(out["second_order_accuracy"], 0.75, places=2)
+        self.assertEqual(out["n"], 8)
+
+    def test_false_belief_empty(self):
+        out = score_task("false_belief", [])
+        self.assertIsNone(out["second_order_accuracy"])
+
+    def test_ucla_trials_format(self):
+        """score_ucla accepts the trials format [{score: int}, ...]."""
+        trials = [{"score": 1}] * 20
+        out = score_task("loneliness_ucla", trials)
+        self.assertEqual(out["ucla_total"], 20)
+        self.assertEqual(out["band"], "low")
+
+    def test_ucla_list_format_still_works(self):
+        """score_ucla still accepts the original list[int] format."""
+        out = score_task("loneliness_ucla", [4] * 20)
+        self.assertEqual(out["ucla_total"], 80)
+        self.assertEqual(out["band"], "high")
+
     def test_unknown_task_rejected(self):
         with self.assertRaises(KeyError):
             score_task("nope", [])
