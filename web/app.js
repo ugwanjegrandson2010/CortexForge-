@@ -266,6 +266,8 @@ function showMainApp() {
   $('view-auth').classList.remove('active');
   $('view-main').classList.add('active');
   $('learner-tag').textContent = ACCOUNT?.display_name || LEARNER;
+  initTheme();
+  initSettings();
   boot();
 }
 
@@ -871,6 +873,74 @@ document.addEventListener('keydown', (e) => {
     if (paletteOpen) closePalette(); else openPalette();
   }
 });
+
+/* ------------------------------------------------------------- theme */
+
+function initTheme() {
+  const stored = localStorage.getItem('cortexforge_theme');
+  if (stored) {
+    document.documentElement.setAttribute('data-theme', stored);
+  }
+  $('theme-toggle').addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('cortexforge_theme', next); } catch (e) {}
+  });
+}
+
+/* ----------------------------------------------------------- settings */
+
+function initSettings() {
+  // Load saved preferences
+  const prefs = JSON.parse(localStorage.getItem('cortexforge_prefs') || '{}');
+  if (prefs.session_min) $('pref-session-min').value = prefs.session_min;
+  if (prefs.days_week) $('pref-days-week').value = prefs.days_week;
+  if (prefs.success_rate) $('pref-success-rate').value = prefs.success_rate;
+  if (prefs.difficulty) $('pref-difficulty').value = prefs.difficulty;
+
+  // Save on change
+  ['pref-session-min', 'pref-days-week', 'pref-success-rate', 'pref-difficulty'].forEach(id => {
+    $(id).addEventListener('change', () => {
+      const prefs = {
+        session_min: Number($('pref-session-min').value),
+        days_week: Number($('pref-days-week').value),
+        success_rate: Number($('pref-success-rate').value),
+        difficulty: $('pref-difficulty').value,
+      };
+      try { localStorage.setItem('cortexforge_prefs', JSON.stringify(prefs)); } catch (e) {}
+      status('preferences saved', 'ok');
+    });
+  });
+
+  // Export data
+  $('export-data').addEventListener('click', async () => {
+    if (!LEARNER) { status('sign in first', 'err'); return; }
+    try {
+      const data = await api('/api/export?learner_id=' + encodeURIComponent(LEARNER));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { attrs: { href: url, download: 'cortexforge-export.json' } });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      status('data exported', 'ok');
+    } catch (e) { status(e.message, 'err'); }
+  });
+
+  // Erase data
+  $('erase-data').addEventListener('click', async () => {
+    if (!LEARNER) { status('sign in first', 'err'); return; }
+    const confirmText = 'ERASE';
+    const input = prompt(`This will permanently delete all your learning data. Type ${confirmText} to confirm:`);
+    if (input !== confirmText) { status('erase cancelled'); return; }
+    try {
+      await api('/api/erase', { method: 'POST', body: JSON.stringify({ learner_id: LEARNER, confirm: confirmText }) });
+      status('data erased', 'ok');
+    } catch (e) { status(e.message, 'err'); }
+  });
+}
 
 /* ------------------------------------------------------------------ go */
 

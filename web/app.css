@@ -1287,6 +1287,74 @@ th {
   border-width: 0;
 }
 
+/* ---------- Light Theme ---------- */
+[data-theme="light"] {
+  --bg: #f8f9fc;
+  --bg-elevated: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f1f3f8;
+  --panel-3: #e4e7ed;
+  --line: #d8dce4;
+  --line-strong: #b8bfcc;
+  --text: #1a1d24;
+  --text-dim: #4a5060;
+  --text-muted: #8a90a0;
+  --accent: #3b6fd4;
+  --accent-hover: #2a5bc0;
+  --accent-active: #1a4ab0;
+  --accent-glow: rgba(59, 111, 212, 0.1);
+  --accent-subtle: rgba(59, 111, 212, 0.05);
+  --success: #0d9d6c;
+  --success-subtle: rgba(13, 157, 108, 0.06);
+  --warning: #d4940a;
+  --warning-subtle: rgba(212, 148, 10, 0.06);
+  --error: #d43a3a;
+  --error-subtle: rgba(212, 58, 58, 0.06);
+  --purple: #7c5cd6;
+  --purple-subtle: rgba(124, 92, 214, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------- Settings ---------- */
+.settings-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+  flex-wrap: wrap;
+}
+
+.btn-danger {
+  background: var(--error-subtle);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-danger:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.settings-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2);
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: var(--text-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
   .sidebar {

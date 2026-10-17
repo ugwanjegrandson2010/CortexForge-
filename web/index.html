@@ -77,6 +77,7 @@
     <header class="bar">
       <div class="brand">CortexForge</div>
       <div class="bar-right">
+        <button id="theme-toggle" class="btn-icon" aria-label="Toggle theme" title="Toggle theme">◐</button>
         <span id="learner-tag" class="tag"></span>
         <span id="status" class="status" role="status" aria-live="polite"></span>
         <button id="logout-btn" class="btn-sm">Sign Out</button>
@@ -108,6 +109,10 @@
         <button class="nav-item" data-view="integrations" role="tab">
           <span class="nav-icon">I</span>
           <span class="nav-label">Integrations</span>
+        </button>
+        <button class="nav-item" data-view="settings" role="tab">
+          <span class="nav-icon">⚙</span>
+          <span class="nav-label">Settings</span>
         </button>
       </nav>
 
@@ -260,6 +265,45 @@
           <div id="mcp-plan"></div>
           <button id="write-mcp" class="btn-primary">Write mcp.json</button>
           <pre id="mcp-out" class="code"></pre>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="view-settings" class="view">
+        <div class="card">
+          <h2>Settings</h2>
+          <p class="lede">Configure your learning preferences. Changes are saved locally.</p>
+
+          <h3>Session Preferences</h3>
+          <label class="field">
+            <span>Session length (minutes)</span>
+            <input id="pref-session-min" type="number" min="5" max="90" value="20">
+          </label>
+          <label class="field">
+            <span>Days per week</span>
+            <input id="pref-days-week" type="number" min="1" max="7" value="4">
+          </label>
+          <label class="field">
+            <span>Target success rate (%)</span>
+            <input id="pref-success-rate" type="number" min="50" max="95" value="85">
+          </label>
+
+          <h3>Difficulty</h3>
+          <label class="field">
+            <span>Difficulty setting</span>
+            <select id="pref-difficulty">
+              <option value="gentle">Gentle (70% target)</option>
+              <option value="evidence_band" selected>Evidence band (85% target)</option>
+              <option value="maximum">Maximum (60% target)</option>
+            </select>
+          </label>
+
+          <h3>Data Management</h3>
+          <div class="settings-actions">
+            <button id="export-data" class="btn-secondary">Export All Data</button>
+            <button id="erase-data" class="btn-danger">Erase All Data</button>
+          </div>
+          <p class="settings-note">Export downloads all your learning data as JSON. Erase permanently deletes everything.</p>
         </div>
       </section>
       </main>
