@@ -183,3 +183,100 @@ def retention_forecast(cards: list[Card], day: float) -> dict:
         "due_now": sum(1 for c in cards if c.due_day <= day),
         "n": len(cards),
     }
+
+
+# ---------------------------------------------------------------------------
+# Parameter fitting (v1.1 — fit FSRS weights from the learner's own history)
+# ---------------------------------------------------------------------------
+
+def _replay_loss(w: list, reviews: list) -> float:
+    """Negative log-likelihood of one card's review sequence under weights `w`.
+
+    Replays the sequence, computing predicted retrievability at each review
+    and scoring the observed grade against it.  This is the standard FSRS
+    memory-model loss: a lapse (grade 1) has probability 1 - R, a recall
+    (grades 2-4) has probability R.
+    """
+    card = Card("fit")
+    loss = 0.0
+    for day, grade in reviews:
+        grade = int(_clamp(grade, 1, 4))
+        if card.state == "new" or card.stability <= 0:
+            card._init_from_grade(grade, w)
+            card.state = "learning" if grade == GRADE_AGAIN else "review"
+            card.reps += 1
+            card.last_review_day = day
+            card.due_day = day + interval_for_retention(card.stability)
+            continue
+
+        elapsed = max(0.0, day - card.last_review_day)
+        r = retrievability(elapsed, card.stability)
+
+        p = max(1.0 - r, 1e-9) if grade == GRADE_AGAIN else max(r, 1e-9)
+        loss -= math.log(p)
+
+        # Difficulty update (mean-reverting)
+        d_delta = -w[6] * (grade - 3)
+        card.difficulty = _clamp(
+            card.difficulty + d_delta * (10.0 - card.difficulty) / 9.0,
+            MIN_DIFFICULTY, MAX_DIFFICULTY,
+        )
+        anchor = _clamp(w[4] - math.exp(w[5] * (GRADE_EASY - 1)) + 1.0,
+                        MIN_DIFFICULTY, MAX_DIFFICULTY)
+        card.difficulty = _clamp(w[7] * anchor + (1 - w[7]) * card.difficulty,
+                                 MIN_DIFFICULTY, MAX_DIFFICULTY)
+
+        if grade == GRADE_AGAIN:
+            card.stability = max(MIN_STABILITY, _stability_after_lapse(
+                card.difficulty, card.stability, r, w))
+            card.lapses += 1
+            card.state = "relearning"
+        else:
+            card.stability = max(MIN_STABILITY, _stability_after_recall(
+                card.difficulty, card.stability, r, grade, w))
+            card.state = "review"
+        card.reps += 1
+        card.last_review_day = day
+        card.due_day = day + interval_for_retention(card.stability)
+    return loss
+
+
+def total_loss(w, review_sequences: list) -> float:
+    """Sum of negative log-likelihood across all review sequences."""
+    return sum(_replay_loss(list(w), rev) for rev in review_sequences)
+
+
+def fit_parameters(review_sequences: list, initial: Iterable[float] = None,
+                   max_iter: int = 500, tolerance: float = 1e-6) -> tuple:
+    """Fit FSRS weights from review sequences using coordinate descent.
+
+    Each sequence is a list of ``(day, grade)`` tuples for one card, ordered
+    by day.  The optimiser perturbs one weight at a time (multiplicative
+    steps of 10 %), keeping any change that reduces the total loss.  It
+    stops when a full pass produces no improvement or ``max_iter`` passes
+    are exhausted.
+
+    Returns a 19-element tuple of fitted weights.  With fewer than ~10
+    reviews the defaults are returned unchanged — fitting on too little
+    data would produce noise, not signal.
+    """
+    n_reviews = sum(len(r) for r in review_sequences)
+    if n_reviews < 10:
+        return tuple(initial) if initial is not None else DEFAULT_W
+
+    w = list(initial) if initial is not None else list(DEFAULT_W)
+    best_loss = total_loss(w, review_sequences)
+
+    for _ in range(max_iter):
+        improved = False
+        for i in range(len(w)):
+            for factor in (1.1, 0.9):
+                candidate = list(w)
+                candidate[i] = max(0.001, candidate[i] * factor)
+                loss = total_loss(candidate, review_sequences)
+                if loss < best_loss - tolerance:
+                    w, best_loss = candidate, loss
+                    improved = True
+        if not improved:
+            break
+    return tuple(w)

@@ -2,6 +2,7 @@
 instruments, profile, onboarding, MCP."""
 
 import json
+import math
 import os
 import sys
 import tempfile
@@ -33,8 +34,8 @@ from cortexforge.questiongen import (  # noqa: E402
     interleave, sentences,
 )
 from cortexforge.scheduler import (  # noqa: E402
-    Card, DEFAULT_W, build_queue, interval_for_retention, retention_forecast,
-    retrievability,
+    Card, DEFAULT_W, build_queue, fit_parameters, interval_for_retention,
+    retention_forecast, retrievability, total_loss,
 )
 from cortexforge.store import Store  # noqa: E402
 from cortexforge.tracing import (  # noqa: E402
@@ -152,6 +153,66 @@ class TestFSRS(unittest.TestCase):
     def test_forecast_empty(self):
         f = retention_forecast([], 0.0)
         self.assertEqual(f["n"], 0)
+
+
+class TestFSRSParameterFitting(unittest.TestCase):
+    """v1.1 — fit FSRS weights from the learner's own review history."""
+
+    def _make_history(self, grades, start_day=0.0, interval=1.0):
+        """Build a review sequence [(day, grade), ...] from a grade list."""
+        return [(start_day + i * interval, g) for i, g in enumerate(grades)]
+
+    def test_returns_defaults_with_too_few_reviews(self):
+        """Fitting on <10 reviews returns defaults, not noise."""
+        seqs = [self._make_history([3, 3, 3]), self._make_history([1, 2])]
+        w = fit_parameters(seqs)
+        self.assertEqual(w, DEFAULT_W)
+
+    def test_output_shape_and_types(self):
+        seqs = [self._make_history([3, 3, 1, 3, 4, 3, 1, 3, 3, 2, 3, 4])
+                for _ in range(5)]
+        w = fit_parameters(seqs, max_iter=20)
+        self.assertEqual(len(w), 19)
+        self.assertTrue(all(isinstance(x, float) for x in w))
+        self.assertTrue(all(x > 0 for x in w))
+
+    def test_loss_non_negative(self):
+        seqs = [self._make_history([3, 3, 3, 1, 3, 4, 2, 3, 3, 1, 3, 4])]
+        loss = total_loss(DEFAULT_W, seqs)
+        self.assertGreater(loss, 0.0)
+
+    def test_fitting_reduces_loss(self):
+        """Coordinate descent must not increase the loss."""
+        seqs = [
+            self._make_history([3, 3, 1, 3, 4, 3, 1, 3, 3, 2, 3, 4]),
+            self._make_history([4, 4, 3, 4, 3, 4, 4, 3, 4, 4, 3, 4]),
+            self._make_history([1, 1, 2, 1, 3, 1, 2, 1, 1, 3, 1, 2]),
+            self._make_history([3, 2, 3, 4, 3, 3, 2, 3, 4, 3, 2, 3]),
+            self._make_history([2, 3, 2, 1, 3, 2, 3, 2, 1, 3, 2, 3]),
+        ]
+        before = total_loss(DEFAULT_W, seqs)
+        w = fit_parameters(seqs, max_iter=100)
+        after = total_loss(w, seqs)
+        self.assertLessEqual(after, before)
+
+    def test_empty_history_returns_defaults(self):
+        w = fit_parameters([])
+        self.assertEqual(w, DEFAULT_W)
+
+    def test_custom_initial_weights(self):
+        """Passing initial weights seeds the optimiser."""
+        seqs = [self._make_history([3, 3, 3, 1, 3, 4, 2, 3, 3, 1, 3, 4])]
+        w0 = list(DEFAULT_W)
+        w = fit_parameters(seqs, initial=w0, max_iter=10)
+        self.assertEqual(len(w), 19)
+        self.assertTrue(all(x > 0 for x in w))
+
+    def test_grades_are_clamped_in_loss(self):
+        """Grades outside 1-4 are clamped before scoring."""
+        seqs = [self._make_history([99, -5, 99, -5, 3, 3, 3, 3, 3, 3, 3, 3])]
+        loss = total_loss(DEFAULT_W, seqs)
+        self.assertGreater(loss, 0.0)
+        self.assertFalse(math.isnan(loss))
 
 
 # ----------------------------------------------------------------- tracing
