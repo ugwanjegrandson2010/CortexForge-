@@ -388,6 +388,26 @@ async function loadDashboard() {
     setRing('ring-weekly', weeklyPct, circumference);
     setRing('ring-mastered', masteredPct, circumference);
 
+    // Session analytics
+    const analyticsEl = $('dash-analytics');
+    analyticsEl.replaceChildren();
+    const analytics = [
+      { label: 'Total Reviews', value: s.n, trend: null },
+      { label: 'Accuracy', value: s.accuracy > 0 ? Math.round(s.accuracy * 100) + '%' : '—', trend: s.accuracy > 0.75 ? 'up' : 'down' },
+      { label: 'Skills', value: (p.observations || []).length, trend: null },
+      { label: 'Questions', value: (p.unmeasured || []).length > 0 ? 'Active' : 'None', trend: null },
+    ];
+    analytics.forEach(a => {
+      const card = el('div', { class: 'analytics-card' });
+      card.appendChild(el('div', { class: 'analytics-value', text: String(a.value) }));
+      card.appendChild(el('div', { class: 'analytics-label', text: a.label }));
+      if (a.trend) {
+        const trend = el('div', { class: 'analytics-trend ' + a.trend, text: a.trend === 'up' ? '↑ improving' : '↓ needs work' });
+        card.appendChild(trend);
+      }
+      analyticsEl.appendChild(card);
+    });
+
     // Recent sessions
     const sessionsEl = $('dash-sessions');
     sessionsEl.replaceChildren();
