@@ -1146,6 +1146,23 @@ function initSettings() {
     } catch (e) { status(e.message, 'err'); }
   });
 
+  // Import data
+  $('import-data').addEventListener('click', () => {
+    $('import-file').click();
+  });
+  $('import-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      // TODO: Implement import API endpoint
+      status('import not yet implemented', 'err');
+    } catch (err) {
+      status('invalid JSON file', 'err');
+    }
+  });
+
   // Erase data
   $('erase-data').addEventListener('click', async () => {
     if (!LEARNER) { status('sign in first', 'err'); return; }
