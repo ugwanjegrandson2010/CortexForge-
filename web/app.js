@@ -765,6 +765,31 @@ $('tutor-begin').addEventListener('click', async () => {
   finally { btn.disabled = false; btn.textContent = 'Begin Tutoring'; }
 });
 
+$('tutor-hint').addEventListener('click', async () => {
+  if (!TUTOR_STATE) { status('begin tutoring first', 'err'); return; }
+  try {
+    const data = await api('/api/tutor/hint', {
+      method: 'POST',
+      body: JSON.stringify({ learner_id: LEARNER })
+    });
+    addTutorMessage(data.text);
+  } catch (e) { status(e.message, 'err'); }
+});
+
+$('tutor-question').addEventListener('click', async () => {
+  if (!TUTOR_STATE) { status('begin tutoring first', 'err'); return; }
+  const question = prompt('What would you like to ask the tutor?');
+  if (!question) return;
+  try {
+    const data = await api('/api/tutor/question', {
+      method: 'POST',
+      body: JSON.stringify({ learner_id: LEARNER, question })
+    });
+    addLearnerMessage(question);
+    addTutorMessage(data.text);
+  } catch (e) { status(e.message, 'err'); }
+});
+
 function addTutorMessage(text) {
   const chat = $('tutor-chat');
   const msg = el('div', { class: 'chat-msg tutor' });
