@@ -794,6 +794,148 @@ button.btn-sm {
 .grade-btn.good { border-color: var(--success); color: var(--success); }
 .grade-btn.easy { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- Progress Rings ---------- */
+.rings-row {
+  display: flex;
+  justify-content: space-around;
+  gap: var(--space-4);
+  padding: var(--space-3);
+}
+
+.ring-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ring {
+  width: 80px;
+  height: 80px;
+  transform: rotate(-90deg);
+}
+
+.ring-bg {
+  fill: none;
+  stroke: var(--panel-3);
+  stroke-width: 8;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-dasharray: 213.6; /* 2 * PI * 34 */
+  stroke-dashoffset: 213.6;
+  transition: stroke-dashoffset var(--duration-slow) var(--ease-out);
+}
+
+.ring-item:nth-child(1) .ring-fill { stroke: var(--accent); }
+.ring-item:nth-child(2) .ring-fill { stroke: var(--success); }
+.ring-item:nth-child(3) .ring-fill { stroke: var(--warning); }
+
+.ring-label {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* ---------- Command Palette ---------- */
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.command-palette-overlay.show {
+  opacity: 1;
+}
+
+.command-palette {
+  width: 90%;
+  max-width: 560px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.command-palette-input {
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  outline: none;
+}
+
+.command-palette-input::placeholder {
+  color: var(--text-muted);
+}
+
+.command-palette-results {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.command-palette-item:hover,
+.command-palette-item.selected {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.command-palette-item .cmd-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+}
+
+.command-palette-item .cmd-label {
+  flex: 1;
+}
+
+.command-palette-item .cmd-shortcut {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.command-palette-empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
 /* ---------- Bottom Banner Feedback ---------- */
 .bottom-banner {
   position: fixed;

@@ -353,12 +353,30 @@ async function loadDashboard() {
       progressEl.appendChild(card);
     });
 
+    // Progress rings
+    const circumference = 2 * Math.PI * 34; // ~213.6
+    const dailyPct = Math.min(s.n / 20, 1); // goal: 20 attempts/day
+    const weeklyPct = Math.min(s.n / 100, 1); // goal: 100 attempts/week
+    const masteredPct = (p.observations || []).length > 0
+      ? (p.observations || []).filter(o => o.confidence === 'high').length / (p.observations || []).length
+      : 0;
+    setRing('ring-daily', dailyPct, circumference);
+    setRing('ring-weekly', weeklyPct, circumference);
+    setRing('ring-mastered', masteredPct, circumference);
+
     // Recent sessions
     const sessionsEl = $('dash-sessions');
     sessionsEl.replaceChildren();
     const recentText = el('div', { class: 'meta', text: 'No sessions yet. Start your first session to see progress here.' });
     sessionsEl.appendChild(recentText);
   } catch (e) { /* silent */ }
+}
+
+function setRing(id, pct, circumference) {
+  const ring = $(id);
+  if (!ring) return;
+  const offset = circumference * (1 - pct);
+  ring.style.strokeDashoffset = String(offset);
 }
 
 function renderMasteryMap(profile) {
@@ -763,6 +781,95 @@ $('write-mcp').addEventListener('click', async () => {
     status('mcp.json written', 'ok');
   } catch (e) { status(e.message, 'err'); }
   finally { btn.disabled = false; btn.textContent = 'Write mcp.json'; }
+});
+
+/* ------------------------------------------------------- command palette */
+
+const COMMANDS = [
+  { id: 'start-session', label: 'Start Study Session', icon: 'S', shortcut: 'Ctrl+S', action: () => switchView('study') },
+  { id: 'add-source', label: 'Add Source Material', icon: 'M', shortcut: 'Ctrl+M', action: () => switchView('sources') },
+  { id: 'load-profile', label: 'View Profile', icon: 'P', shortcut: 'Ctrl+P', action: () => switchView('profile') },
+  { id: 'start-tutor', label: 'Start Tutoring', icon: 'T', shortcut: 'Ctrl+T', action: () => switchView('tutor') },
+  { id: 'view-integrations', label: 'View Integrations', icon: 'I', shortcut: 'Ctrl+I', action: () => switchView('integrations') },
+  { id: 'load-dashboard', label: 'Go to Dashboard', icon: 'D', shortcut: 'Ctrl+D', action: () => switchView('dashboard') },
+];
+
+let paletteOpen = false;
+let paletteResults = [];
+let paletteIndex = 0;
+
+function switchView(view) {
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelector(`.nav-item[data-view="${view}"]`)?.classList.add('active');
+  $('view-' + view)?.classList.add('active');
+}
+
+function openPalette() {
+  if (paletteOpen) return;
+  paletteOpen = true;
+  paletteResults = COMMANDS;
+  paletteIndex = 0;
+  const overlay = el('div', { class: 'command-palette-overlay' });
+  overlay.id = 'cmd-overlay';
+  const palette = el('div', { class: 'command-palette' });
+  const input = el('input', { class: 'command-palette-input', attrs: { type: 'text', placeholder: 'Type a command…', autocomplete: 'off' } });
+  const results = el('div', { class: 'command-palette-results' });
+  results.id = 'cmd-results';
+  palette.appendChild(input);
+  palette.appendChild(results);
+  overlay.appendChild(palette);
+  document.body.appendChild(overlay);
+  input.focus();
+  renderPaletteResults();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
+  input.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    paletteResults = COMMANDS.filter(c => c.label.toLowerCase().includes(q));
+    paletteIndex = 0;
+    renderPaletteResults();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); paletteIndex = Math.min(paletteIndex + 1, paletteResults.length - 1); renderPaletteResults(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); paletteIndex = Math.max(paletteIndex - 1, 0); renderPaletteResults(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (paletteResults[paletteIndex]) { closePalette(); paletteResults[paletteIndex].action(); } }
+    else if (e.key === 'Escape') { closePalette(); }
+  });
+  requestAnimationFrame(() => overlay.classList.add('show'));
+}
+
+function renderPaletteResults() {
+  const results = $('cmd-results');
+  if (!results) return;
+  results.replaceChildren();
+  if (paletteResults.length === 0) {
+    results.appendChild(el('div', { class: 'command-palette-empty', text: 'No commands found' }));
+    return;
+  }
+  paletteResults.forEach((cmd, i) => {
+    const item = el('div', { class: 'command-palette-item' + (i === paletteIndex ? ' selected' : '') });
+    item.appendChild(el('div', { class: 'cmd-icon', text: cmd.icon }));
+    item.appendChild(el('div', { class: 'cmd-label', text: cmd.label }));
+    item.appendChild(el('div', { class: 'cmd-shortcut', text: cmd.shortcut }));
+    item.addEventListener('click', () => { closePalette(); cmd.action(); });
+    results.appendChild(item);
+  });
+}
+
+function closePalette() {
+  paletteOpen = false;
+  const overlay = $('cmd-overlay');
+  if (overlay) {
+    overlay.classList.remove('show');
+    setTimeout(() => overlay.remove(), 200);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    if (paletteOpen) closePalette(); else openPalette();
+  }
 });
 
 /* ------------------------------------------------------------------ go */
