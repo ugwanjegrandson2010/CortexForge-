@@ -29,6 +29,7 @@ from typing import Iterable
 
 from .instruments import (EVIDENCE_MODERATE, EVIDENCE_STRONG, EVIDENCE_WEAK,
                           REGISTRY, servable_tasks)
+from .learner_profile import LearnerProfile
 
 # ---------------------------------------------------------------------------
 # Statement validation
@@ -752,3 +753,121 @@ def session_summary(attempts: list[dict]) -> dict:
     return {"n": n, "correct": correct, "accuracy": round(acc, 3),
             "median_latency_ms": med_lat, "verdict": verdict,
             "statement": stmt}
+
+
+# ---------------------------------------------------------------------------
+# Bridge to the 10-dimension LearnerProfile
+# ---------------------------------------------------------------------------
+
+
+def build_learner_profile(learner_id: str, task_scores: dict[str, dict],
+                          learning_metrics: dict | None = None) -> LearnerProfile:
+    """Build a LearnerProfile from task scores and learning metrics.
+
+    This is the 10-dimension counterpart to build_profile(). It creates a
+    LearnerProfile and populates the relevant dimensions from the same
+    inputs, maintaining the security constraints (no clinical language,
+    no praise without information, no unfalsifiable character claims).
+    """
+    prof = LearnerProfile(learner_id=learner_id)
+    measured: set[str] = set()
+
+    for task_id, scores in task_scores.items():
+        spec = REGISTRY.get(task_id)
+        if spec is None:
+            continue
+        if spec.clinical_only:
+            raise StatementError(f"refusing clinical task {task_id!r}")
+
+        event_id = f"task:{task_id}"
+        construct = spec.construct
+
+        # Map constructs to dimensions
+        if construct in ("inhibitory_control", "working_memory_updating"):
+            updates = {}
+            if "interference_cost_ms" in scores:
+                updates["interference_cost_ms"] = scores["interference_cost_ms"]
+            if "d_prime" in scores:
+                updates["wm_proxy"] = scores["d_prime"]
+            if updates:
+                prof.update_from_instrument(
+                    "cognitive_capacities", event_id, updates
+                )
+                measured.add(construct)
+        elif construct == "processing_speed":
+            prof.update_from_instrument(
+                "cognitive_capacities", event_id,
+                {"processing_speed": scores.get("median_rt_ms")},
+            )
+            measured.add(construct)
+        elif construct == "metacognitive_calibration":
+            cal = scores
+            prof.update_from_instrument(
+                "self_regulation", event_id,
+                {"monitoring_accuracy": cal.get("bias")},
+            )
+            measured.add(construct)
+        elif construct == "social_connectedness":
+            prof.update_from_instrument(
+                "affect_wellbeing", event_id,
+                {"social_connectedness": scores.get("ucla_total")},
+            )
+            measured.add(construct)
+        elif construct in ("risk_taking", "impulsivity"):
+            # These inform motivation and affect but are not direct measures
+            measured.add(construct)
+
+    # Learning metrics -> knowledge state, self-regulation
+    lm = learning_metrics or {}
+    if lm.get("calibration"):
+        cal = lm["calibration"]
+        prof.update_from_instrument(
+            "self_regulation", "learning_metrics:calibration",
+            {"monitoring_accuracy": cal.get("bias")},
+        )
+
+    # Record interaction history
+    prof.update_from_practice(
+        "interaction_history", "profile_build",
+        {"total_sessions": len(task_scores)},
+    )
+
+    return prof
+
+
+def profile_to_learner_profile(profile: Profile) -> LearnerProfile:
+    """Convert an existing Profile to a LearnerProfile.
+
+    Maps the observations from the old Profile format into the relevant
+    dimensions of the new 10-dimension model.
+    """
+    lp = LearnerProfile(learner_id=profile.learner_id)
+
+    for obs in profile.observations:
+        event_id = f"obs:{obs.construct}"
+
+        if obs.construct in ("inhibitory_control", "working_memory_updating"):
+            updates = {}
+            if isinstance(obs.value, (int, float)):
+                if obs.construct == "inhibitory_control":
+                    updates["interference_cost_ms"] = obs.value
+                elif obs.construct == "working_memory_updating":
+                    updates["wm_proxy"] = obs.value
+            if updates:
+                lp.update_from_instrument(
+                    "cognitive_capacities", event_id, updates
+                )
+        elif obs.construct == "metacognitive_calibration":
+            if isinstance(obs.value, (int, float)):
+                lp.update_from_instrument(
+                    "self_regulation", event_id,
+                    {"monitoring_accuracy": obs.value},
+                )
+        elif obs.construct == "social_connectedness":
+            if isinstance(obs.value, (int, float)):
+                lp.update_from_instrument(
+                    "affect_wellbeing", event_id,
+                    {"social_connectedness": obs.value},
+                )
+
+    return lp

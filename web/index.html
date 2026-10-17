@@ -13,122 +13,199 @@
 <body>
 <canvas id="bg-canvas" aria-hidden="true"></canvas>
 <div id="app">
-  <header class="bar">
-    <div class="brand">CortexForge</div>
-    <div class="bar-right">
-      <span id="learner-tag" class="tag"></span>
-      <input id="token-input" type="text" placeholder="API token" autocomplete="off"
-             aria-label="API token">
-      <span id="status" class="status" role="status" aria-live="polite"></span>
+
+  <!-- AUTH VIEW -->
+  <section id="view-auth" class="view active">
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-icon">CF</div>
+          <h1>CortexForge</h1>
+          <p class="auth-tagline">An adaptive learning system that measures you before it teaches you.</p>
+        </div>
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-auth="login">Sign In</button>
+          <button class="auth-tab" data-auth="register">Create Account</button>
+        </div>
+        <div id="auth-form-login" class="auth-form">
+          <label class="field">
+            <span>Email</span>
+            <input id="login-email" type="email" placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="login-password" type="password" placeholder="Your password" autocomplete="current-password">
+          </label>
+          <button id="login-btn" class="primary btn-block">Sign In</button>
+          <div class="auth-links">
+            <a href="#" id="forgot-link">Forgot password?</a>
+          </div>
+        </div>
+        <div id="auth-form-register" class="auth-form hidden">
+          <label class="field">
+            <span>Display name</span>
+            <input id="reg-name" type="text" placeholder="How should we call you?">
+          </label>
+          <label class="field">
+            <span>Email</span>
+            <input id="reg-email" type="email" placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="reg-password" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+          </label>
+          <div class="pw-strength" id="pw-strength"></div>
+          <button id="register-btn" class="primary btn-block">Create Account</button>
+          <p class="auth-note">A verification email will be sent to confirm your address.</p>
+        </div>
+        <div id="auth-form-reset" class="auth-form hidden">
+          <label class="field">
+            <span>Email</span>
+            <input id="reset-email" type="email" placeholder="you@example.com">
+          </label>
+          <button id="reset-btn" class="primary btn-block">Send Reset Link</button>
+          <div class="auth-links">
+            <a href="#" id="back-to-login">Back to sign in</a>
+          </div>
+        </div>
+      </div>
     </div>
-  </header>
+  </section>
 
-  <nav class="tabs" role="tablist">
-    <button class="tab active" data-view="onboard" role="tab">Setup</button>
-    <button class="tab" data-view="source" role="tab">Sources</button>
-    <button class="tab" data-view="study" role="tab">Study</button>
-    <button class="tab" data-view="profile" role="tab">Profile</button>
-    <button class="tab" data-view="mcp" role="tab">Integrations</button>
-  </nav>
+  <!-- MAIN APP (shown after login) -->
+  <section id="view-main" class="view">
+    <header class="bar">
+      <div class="brand">CortexForge</div>
+      <div class="bar-right">
+        <span id="learner-tag" class="tag"></span>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
+        <button id="logout-btn" class="btn-sm">Sign Out</button>
+      </div>
+    </header>
 
-  <main>
-    <!-- SETUP -->
-    <section id="view-onboard" class="view active">
-      <div class="card">
-        <h1>Build your learning system</h1>
-        <p class="lede">
-          This takes about 45 minutes in total, and it is the only part of the
-          system that asks rather than measures. It exists because a system
-          built for passing an exam is not the system built for understanding a
-          field, and the difference is not something you can guess.
-        </p>
-        <label class="field">
-          <span>Your name or handle (used only on this device)</span>
-          <input id="learner-input" type="text" autocomplete="off" placeholder="e.g. sam">
-        </label>
-        <button id="start-onboarding" class="primary">Begin setup</button>
-      </div>
-      <div id="probe-area"></div>
-      <div id="contract-area"></div>
-    </section>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-view="study" role="tab">Study</button>
+      <button class="tab" data-view="sources" role="tab">Sources</button>
+      <button class="tab" data-view="profile" role="tab">Profile</button>
+      <button class="tab" data-view="tutor" role="tab">Tutor</button>
+      <button class="tab" data-view="integrations" role="tab">Integrations</button>
+    </nav>
 
-    <!-- SOURCES -->
-    <section id="view-source" class="view">
-      <div class="card">
-        <h2>Add source material</h2>
-        <p class="lede">
-          Your own material produces the best questions, because they will be
-          in your vocabulary and about your syllabus. Paste text, or connect
-          Notion or Obsidian from the Integrations tab and pull from there.
-        </p>
-        <label class="field">
-          <span>Title</span>
-          <input id="source-title" type="text" placeholder="e.g. Chapter 4 — Photosynthesis">
-        </label>
-        <label class="field">
-          <span>Text</span>
-          <textarea id="source-text" rows="10" placeholder="Paste your notes, a chapter, or an article…"></textarea>
-        </label>
-        <button id="add-source" class="primary">Add source</button>
-      </div>
-      <div class="card">
-        <h2>Generate questions</h2>
-        <p class="lede">
-          Every style is generated from your text. A style that your material
-          cannot support is skipped and reported rather than faked.
-        </p>
-        <label class="field">
-          <span>Source</span>
-          <select id="gen-source"></select>
-        </label>
-        <label class="field">
-          <span>Styles (leave empty for all)</span>
-          <div id="style-picker" class="chips"></div>
-        </label>
-        <button id="generate" class="primary">Generate</button>
-      </div>
-      <div id="gen-result"></div>
-    </section>
+    <main>
+      <!-- DASHBOARD -->
+      <section id="view-dashboard" class="view active">
+        <div class="dash-grid">
+          <div class="card dash-hero">
+            <h2 id="dash-greeting">Welcome back</h2>
+            <p class="lede" id="dash-summary">Loading your learning summary…</p>
+            <div class="dash-actions">
+              <button id="dash-start-session" class="btn-primary">Start Session</button>
+              <button id="dash-add-source" class="btn-secondary">Add Source</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Today's Plan</h3>
+            <div id="dash-plan" class="plan-list"></div>
+          </div>
+          <div class="card">
+            <h3>Progress</h3>
+            <div id="dash-progress" class="progress-grid"></div>
+          </div>
+          <div class="card">
+            <h3>Recent Sessions</h3>
+            <div id="dash-sessions" class="session-list"></div>
+          </div>
+        </div>
+      </section>
 
-    <!-- STUDY -->
-    <section id="view-study" class="view">
-      <div class="card">
-        <h2>Today's session</h2>
-        <div id="session-meta" class="meta"></div>
-        <button id="load-session" class="primary">Load session</button>
-      </div>
-      <div id="question-area"></div>
-      <div id="summary-area"></div>
-    </section>
+      <!-- STUDY -->
+      <section id="view-study" class="view">
+        <div class="study-layout">
+          <div class="card">
+            <h2>Study Session</h2>
+            <div id="session-meta" class="meta"></div>
+            <button id="load-session" class="btn-primary">Load Session</button>
+          </div>
+          <div id="question-area"></div>
+          <div id="summary-area"></div>
+        </div>
+      </section>
 
-    <!-- PROFILE -->
-    <section id="view-profile" class="view">
-      <div class="card">
-        <h2>Your behavioural profile</h2>
-        <p class="lede">
-          These are behavioural observations from short tasks, each carrying its
-          own confidence label. Nothing here is a personality test and nothing
-          here is a clinical assessment.
-        </p>
-        <button id="load-profile" class="primary">Load profile</button>
-      </div>
-      <div id="profile-area"></div>
-    </section>
+      <!-- SOURCES -->
+      <section id="view-sources" class="view">
+        <div class="card">
+          <h2>Add Source Material</h2>
+          <p class="lede">Your own material produces the best questions, because they will be in your vocabulary and about your syllabus.</p>
+          <label class="field">
+            <span>Title</span>
+            <input id="source-title" type="text" placeholder="e.g. Chapter 4 — Photosynthesis">
+          </label>
+          <label class="field">
+            <span>Text</span>
+            <textarea id="source-text" rows="10" placeholder="Paste your notes, a chapter, or an article…"></textarea>
+          </label>
+          <button id="add-source" class="btn-primary">Add Source</button>
+        </div>
+        <div class="card">
+          <h2>Generate Questions</h2>
+          <p class="lede">Every style is generated from your text. A style that your material cannot support is skipped and reported rather than faked.</p>
+          <label class="field">
+            <span>Source</span>
+            <select id="gen-source"></select>
+          </label>
+          <label class="field">
+            <span>Styles (leave empty for all)</span>
+            <div id="style-picker" class="chips"></div>
+          </label>
+          <button id="generate" class="btn-primary">Generate</button>
+        </div>
+        <div id="gen-result"></div>
+      </section>
 
-    <!-- MCP -->
-    <section id="view-mcp" class="view">
-      <div class="card">
-        <h2>Integrations</h2>
-        <p class="lede">
-          Every server is pre-declared. The only step left for you is to
-          authorise the ones that use OAuth.
-        </p>
-        <div id="mcp-plan"></div>
-        <button id="write-mcp" class="primary">Write mcp.json</button>
-        <pre id="mcp-out" class="code"></pre>
-      </div>
-    </section>
-  </main>
+      <!-- PROFILE -->
+      <section id="view-profile" class="view">
+        <div class="card">
+          <h2>Your Learner Profile</h2>
+          <p class="lede">These are behavioural observations from short tasks, each carrying its own confidence label. Nothing here is a personality test and nothing here is a clinical assessment.</p>
+          <button id="load-profile" class="btn-primary">Load Profile</button>
+        </div>
+        <div id="profile-area"></div>
+      </section>
+
+      <!-- TUTOR -->
+      <section id="view-tutor" class="view">
+        <div class="card">
+          <h2>Socratic Tutor</h2>
+          <p class="lede">The tutor guides, hints, and questions — it does not give answers. It adapts to your affect and struggle level.</p>
+          <label class="field">
+            <span>Topic</span>
+            <input id="tutor-topic" type="text" placeholder="What do you want to work on?">
+          </label>
+          <label class="field">
+            <span>Mode</span>
+            <select id="tutor-mode">
+              <option value="practice">Practice (no answers revealed)</option>
+              <option value="exploration">Exploration (answers allowed)</option>
+            </select>
+          </label>
+          <button id="tutor-begin" class="btn-primary">Begin Tutoring</button>
+        </div>
+        <div id="tutor-chat" class="chat-area"></div>
+      </section>
+
+      <!-- INTEGRATIONS -->
+      <section id="view-integrations" class="view">
+        <div class="card">
+          <h2>Integrations</h2>
+          <p class="lede">Every server is pre-declared. The only step left for you is to authorise the ones that use OAuth.</p>
+          <div id="mcp-plan"></div>
+          <button id="write-mcp" class="btn-primary">Write mcp.json</button>
+          <pre id="mcp-out" class="code"></pre>
+        </div>
+      </section>
+    </main>
+  </section>
 </div>
 <script src="/static/lib/three.min.js"></script>
 <script src="/static/tasks.js"></script>

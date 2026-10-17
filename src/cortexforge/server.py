@@ -44,9 +44,19 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .accounts import AccountManager, SmtpConfig, RateLimiter
+from .environment import (EnvironmentAudit, PrescriptionGenerator,
+                         PhysicalEnvironment, DigitalEnvironment,
+                         SocialEnvironment, TemporalEnvironment,
+                         MaterialsEnvironment)
+from .evaluation import (create_default_registry, ScoringEngine,
+                         BatteryScheduler, score_and_update_profile,
+                         InstrumentRegistry)
 from .instruments import task_manifest, score_task, REGISTRY
+from .learner_profile import LearnerProfile
 from .mcp import (CATALOGUE, build_mcp_config, core_servers, onboarding_plan,
                   write_mcp_config)
+from .neuroprotection import NeuroProtectionSystem, Trial
 from .onboarding import Onboarding, PROBES, PROBES_BY_ID
 from .profile import build_profile, grade_feedback, session_summary
 from .questiongen import ALL_STYLES, generate_from_source, interleave
@@ -54,8 +64,10 @@ from .scheduler import Card, build_queue, retention_forecast
 from .security import (MAX_DOCUMENT_BYTES, SecurityError, escape_html,
                        load_json_only, safe_join, sanitise_text,
                        security_headers, secure_token)
+from .session import SessionRunner, SessionConfig, SessionType, StageName
 from .store import Store
 from .tracing import BKTSkill, BKTParams, Item, calibration_stats, select_next_item
+from .tutor import TutorHarness, TutorMode
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -75,6 +87,15 @@ class AppState:
         self.theta: dict[str, float] = {}
         self.cards: dict[str, dict[str, Card]] = {}
         self.day_zero: dict[str, float] = {}
+        self.tutors: dict[str, TutorHarness] = {}
+        self.session_runners: dict[str, SessionRunner] = {}
+        self.neuroprotection: dict[str, NeuroProtectionSystem] = {}
+        self.learner_profiles: dict[str, LearnerProfile] = {}
+        self.eval_registries: dict[str, InstrumentRegistry] = {}
+        self.eval_schedulers: dict[str, BatteryScheduler] = {}
+        self.eval_engines: dict[str, ScoringEngine] = {}
+        self.accounts = AccountManager(self.store)
+        self.auth_rate_limiter = RateLimiter(window=60, max_attempts=5)
 
     def day(self, learner_id: str) -> float:
         if learner_id not in self.day_zero:
@@ -184,6 +205,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(onboarding_plan())
             if path == "/api/mcp/config":
                 return self._json(build_mcp_config())
+            if path == "/api/learner-profile":
+                return self._learner_profile_get(query)
+            if path == "/api/session/summary":
+                return self._session_summary_get(query)
+            if path == "/api/environment/audit":
+                return self._environment_audit_get(query)
+            if path == "/api/neuroprotection/status":
+                return self._neuroprotection_status_get(query)
+            if path == "/api/evaluation/battery":
+                return self._evaluation_battery_get(query)
+            if path == "/api/account/verify":
+                return self._account_verify_get(query)
             return self._error(404, "not found")
         except SecurityError as exc:
             return self._error(400, str(exc))
@@ -216,6 +249,42 @@ class Handler(BaseHTTPRequestHandler):
                 return self._erase(body)
             if path == "/api/mcp/config":
                 return self._write_mcp(body)
+            if path == "/api/session/start":
+                return self._session_start(body)
+            if path == "/api/session/stage":
+                return self._session_stage(body)
+            if path == "/api/session/close":
+                return self._session_close(body)
+            if path == "/api/tutor/begin":
+                return self._tutor_begin(body)
+            if path == "/api/tutor/respond":
+                return self._tutor_respond(body)
+            if path == "/api/tutor/hint":
+                return self._tutor_hint(body)
+            if path == "/api/tutor/answer":
+                return self._tutor_answer(body)
+            if path == "/api/tutor/question":
+                return self._tutor_question(body)
+            if path == "/api/environment/submit":
+                return self._environment_submit(body)
+            if path == "/api/neuroprotection/trial":
+                return self._neuroprotection_trial(body)
+            if path == "/api/evaluation/respond":
+                return self._evaluation_respond(body)
+            if path == "/api/learner-profile/update":
+                return self._learner_profile_update(body)
+            if path == "/api/account/create":
+                return self._account_create(body)
+            if path == "/api/account/login":
+                return self._account_login(body)
+            if path == "/api/account/logout":
+                return self._account_logout(body)
+            if path == "/api/account/session":
+                return self._account_session(body)
+            if path == "/api/account/reset-request":
+                return self._account_reset_request(body)
+            if path == "/api/account/reset":
+                return self._account_reset(body)
             return self._error(404, "not found")
         except SecurityError as exc:
             return self._error(400, str(exc))
@@ -438,6 +507,368 @@ class Handler(BaseHTTPRequestHandler):
         out = Path(body.get("path") or (Path.home() / ".cortexforge" / "mcp.json"))
         p = write_mcp_config(out, keys)
         self._json({"written": str(p), "servers": list(build_mcp_config(keys)["mcpServers"])})
+
+
+    # -- learner profile -------------------------------------------------
+
+    def _learner_profile_get(self, query: dict) -> None:
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        prof = self.state.learner_profiles.get(lid)
+        if prof is None:
+            prof = self.state.learner_profiles.setdefault(lid, LearnerProfile(lid))
+        self._json(prof.to_dict())
+
+    def _learner_profile_update(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        prof = self.state.learner_profiles.setdefault(lid, LearnerProfile(lid))
+        event_type = str(body.get("event_type") or "")
+        if event_type == "attempt":
+            prof.record_attempt(
+                skill_id=str(body.get("skill_id") or "general"),
+                correct=bool(body.get("correct")),
+                confidence=body.get("confidence"),
+                latency_ms=int(body.get("latency_ms") or 0),
+            )
+        elif event_type == "session":
+            prof.record_session(
+                session_type=str(body.get("session_type") or "practice"),
+                duration_min=float(body.get("duration_min") or 0),
+                success_rate=body.get("success_rate"),
+            )
+        elif event_type == "instrument":
+            prof.record_instrument_score(
+                instrument_id=str(body.get("instrument_id") or ""),
+                score=body.get("score"),
+                subscale=body.get("subscale"),
+            )
+        elif event_type == "override":
+            prof.update_from_override(
+                dimension=str(body.get("dimension") or ""),
+                field=str(body.get("field") or ""),
+                value=body.get("value"),
+                reason=str(body.get("reason") or ""),
+            )
+        else:
+            return self._error(400, "event_type must be attempt, session, instrument, or override")
+        self._json(prof.to_dict())
+
+    # -- session ----------------------------------------------------------
+
+    def _session_start(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        stype = str(body.get("session_type") or "practice")
+        try:
+            session_type = SessionType(stype)
+        except ValueError:
+            return self._error(400, f"unknown session_type: {stype}")
+        cfg = SessionConfig(
+            session_type=session_type,
+            day=self.state.day(lid),
+            limit=int(body.get("limit") or 20),
+            target_success_rate=float(body.get("target_success_rate") or 0.80),
+            enable_forethought=bool(body.get("enable_forethought", True)),
+            enable_reflection=bool(body.get("enable_reflection", True)),
+        )
+        runner = SessionRunner(cfg)
+        with self.state.lock:
+            self.state.session_runners[lid] = runner
+        self._json(runner.start())
+
+    def _session_stage(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        runner = self.state.session_runners.get(lid)
+        if runner is None:
+            return self._error(404, "no active session")
+        stage = str(body.get("stage") or "")
+        try:
+            stage_name = StageName(stage)
+        except ValueError:
+            return self._error(400, f"unknown stage: {stage}")
+        action = str(body.get("action") or "enter")
+        if action == "enter":
+            result = runner.enter_stage(stage_name)
+        elif action == "exit":
+            result = runner.exit_stage(stage_name)
+        else:
+            return self._error(400, "action must be enter or exit")
+        self._json(result)
+
+    def _session_close(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        runner = self.state.session_runners.pop(lid, None)
+        if runner is None:
+            return self._error(404, "no active session")
+        result = runner.close()
+        self._json(result)
+
+    def _session_summary_get(self, query: dict) -> None:
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        runner = self.state.session_runners.get(lid)
+        if runner is None:
+            return self._error(404, "no active session")
+        self._json(runner.get_session_summary())
+
+    # -- tutor ------------------------------------------------------------
+
+    def _tutor_begin(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        topic = sanitise_text(str(body.get("topic") or ""), 500)
+        mode_str = str(body.get("mode") or "practice")
+        try:
+            mode = TutorMode(mode_str)
+        except ValueError:
+            return self._error(400, f"unknown mode: {mode_str}")
+        tutor = self.state.tutors.setdefault(lid, TutorHarness())
+        question = None
+        q_data = body.get("question")
+        if isinstance(q_data, dict):
+            question = Question(
+                qid=str(q_data.get("qid") or ""),
+                text=str(q_data.get("text") or ""),
+                answer=str(q_data.get("answer") or ""),
+                skill_id=str(q_data.get("skill_id") or ""),
+                style=str(q_data.get("style") or ""),
+                meta=q_data.get("meta"),
+            )
+        session = tutor.begin_session(lid, topic, mode, question)
+        self._json({"learner_id": lid, "state": session.current().value})
+
+    def _tutor_respond(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        tutor = self.state.tutors.get(lid)
+        if tutor is None:
+            return self._error(404, "no tutor session")
+        msg = sanitise_text(str(body.get("message") or ""), 5000)
+        resp = tutor.respond(lid, msg)
+        self._json(resp.to_dict())
+
+    def _tutor_hint(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        tutor = self.state.tutors.get(lid)
+        if tutor is None:
+            return self._error(404, "no tutor session")
+        resp = tutor.provide_hint(lid)
+        self._json(resp.to_dict())
+
+    def _tutor_answer(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        tutor = self.state.tutors.get(lid)
+        if tutor is None:
+            return self._error(404, "no tutor session")
+        answer = str(body.get("answer") or "")
+        resp = tutor.check_answer(lid, answer)
+        self._json(resp.to_dict())
+
+    def _tutor_question(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        tutor = self.state.tutors.get(lid)
+        if tutor is None:
+            return self._error(404, "no tutor session")
+        q = sanitise_text(str(body.get("question") or ""), 5000)
+        resp = tutor.handle_question(lid, q)
+        self._json(resp.to_dict())
+
+    # -- environment ------------------------------------------------------
+
+    def _environment_audit_get(self, query: dict) -> None:
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        audit = self.state.store.get_environment_audit(lid)
+        if audit is None:
+            return self._json({"learner_id": lid, "audit": None,
+                                "prescriptions": []})
+        self._json({"learner_id": lid, "audit": audit.to_dict()})
+
+    def _environment_submit(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        p_data = body.get("physical") or {}
+        d_data = body.get("digital") or {}
+        s_data = body.get("social") or {}
+        t_data = body.get("temporal") or {}
+        m_data = body.get("materials") or {}
+        audit = EnvironmentAudit(
+            learner_id=lid,
+            physical=PhysicalEnvironment(
+                lighting=str(p_data.get("lighting") or ""),
+                noise_sources=list(p_data.get("noise_sources") or []),
+                temperature_c=p_data.get("temperature_c"),
+                green_view=bool(p_data.get("green_view", False)),
+                has_indoor_plants=bool(p_data.get("has_indoor_plants", False)),
+                ergonomic_setup=str(p_data.get("ergonomic_setup") or ""),
+                phone_location=str(p_data.get("phone_location") or ""),
+                desk_clutter=str(p_data.get("desk_clutter") or ""),
+            ),
+            digital=DigitalEnvironment(
+                notification_load=str(d_data.get("notification_load") or ""),
+                blocker_available=bool(d_data.get("blocker_available", False)),
+                blocker_active=bool(d_data.get("blocker_active", False)),
+                distraction_sources=list(d_data.get("distraction_sources") or []),
+                phone_in_reach=bool(d_data.get("phone_in_reach", True)),
+                social_media_apps_installed=bool(d_data.get("social_media_apps_installed", True)),
+                website_blocker_installed=bool(d_data.get("website_blocker_installed", False)),
+            ),
+            social=SocialEnvironment(
+                study_partners=list(s_data.get("study_partners") or []),
+                household_support=str(s_data.get("household_support") or ""),
+                quiet_hours_feasible=bool(s_data.get("quiet_hours_feasible", False)),
+                quiet_hours=str(s_data.get("quiet_hours") or ""),
+                social_commitment_device=bool(s_data.get("social_commitment_device", False)),
+            ),
+            temporal=TemporalEnvironment(
+                sleep_schedule=str(t_data.get("sleep_schedule") or ""),
+                typical_bedtime=str(t_data.get("typical_bedtime") or ""),
+                typical_wake_time=str(t_data.get("typical_wake_time") or ""),
+                anchors=list(t_data.get("anchors") or []),
+                deadline_map_visible=bool(t_data.get("deadline_map_visible", False)),
+                intermediate_checkpoints=bool(t_data.get("intermediate_checkpoints", False)),
+                exam_date_known=bool(t_data.get("exam_date_known", False)),
+                exam_date=str(t_data.get("exam_date") or ""),
+            ),
+            materials=MaterialsEnvironment(
+                textbook_access=str(m_data.get("textbook_access") or ""),
+                calculator_available=bool(m_data.get("calculator_available", False)),
+                stationery_ready=bool(m_data.get("stationery_ready", False)),
+                materials_visible=bool(m_data.get("materials_visible", False)),
+                digital_notes_organised=bool(m_data.get("digital_notes_organised", False)),
+            ),
+        )
+        self.state.store.save_environment_audit(lid, audit.to_dict())
+        gen = PrescriptionGenerator(audit)
+        prescriptions = gen.generate(max_prescriptions=int(body.get("max_prescriptions") or 5))
+        self._json({"learner_id": lid, "audit": audit.to_dict(),
+                    "prescriptions": [p.to_dict() for p in prescriptions]})
+
+    # -- neuroprotection --------------------------------------------------
+
+    def _neuroprotection_status_get(self, query: dict) -> None:
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        nps = self.state.neuroprotection.get(lid)
+        if nps is None:
+            nps = self.state.neuroprotection.setdefault(lid, NeuroProtectionSystem())
+        status = nps.check_session(hour=int(query.get("hour") or [0])[0])
+        self._json(status.to_dict())
+
+    def _neuroprotection_trial(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        nps = self.state.neuroprotection.setdefault(lid, NeuroProtectionSystem())
+        correct = bool(body.get("correct"))
+        rt_ms = float(body.get("rt_ms") or 0)
+        nps.clarity_guardian.record_trial(correct, rt_ms)
+        self._json({"learner_id": lid, "recorded": True})
+
+    # -- evaluation -------------------------------------------------------
+
+    def _evaluation_battery_get(self, query: dict) -> None:
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        registry = self.state.eval_registries.setdefault(lid, create_default_registry())
+        scheduler = self.state.eval_schedulers.setdefault(lid, BatteryScheduler(registry))
+        engine = self.state.eval_engines.setdefault(lid, ScoringEngine(registry))
+        due = scheduler.recommend_today()
+        instruments = []
+        for inst_id in due:
+            inst = registry.get(inst_id)
+            if inst:
+                instruments.append(inst.to_dict())
+        self._json({"learner_id": lid, "due_instruments": instruments,
+                    "daily_plan": scheduler.get_daily_plan()})
+
+    def _evaluation_respond(self, body: dict) -> None:
+        lid = self._learner_id(body)
+        registry = self.state.eval_registries.setdefault(lid, create_default_registry())
+        scheduler = self.state.eval_schedulers.setdefault(lid, BatteryScheduler(registry))
+        engine = self.state.eval_engines.setdefault(lid, ScoringEngine(registry))
+        instrument_id = str(body.get("instrument_id") or "")
+        responses = body.get("responses") or {}
+        if not isinstance(responses, dict):
+            return self._error(400, "responses must be an object")
+        try:
+            result = engine.score(instrument_id, responses)
+        except (KeyError, ValueError) as exc:
+            return self._error(400, str(exc))
+        scheduler.record_administration(instrument_id)
+        observations = engine.score_to_observations(result)
+        self._json({"learner_id": lid, "result": result.to_dict(),
+                    "observations": observations})
+
+    # -- account ---------------------------------------------------------
+
+    def _account_verify_get(self, query: dict) -> None:
+        token = (query.get("token") or [""])[0]
+        if not token:
+            return self._error(400, "token required")
+        try:
+            result = self.state.accounts.verify_email(token)
+            self._json(result)
+        except SecurityError as exc:
+            self._error(400, str(exc))
+
+    def _account_create(self, body: dict) -> None:
+        # Rate limit account creation
+        if not self.state.auth_rate_limiter.check("create"):
+            return self._error(429, "too many account creation attempts")
+        email = str(body.get("email") or "")
+        password = str(body.get("password") or "")
+        display_name = str(body.get("display_name") or "")
+        try:
+            account = self.state.accounts.create_account(
+                email, password, display_name
+            )
+            self.state.store.log_event("account_create", "", account["learner_id"])
+            self._json(account, 201)
+        except SecurityError as exc:
+            self._error(400, str(exc))
+
+    def _account_login(self, body: dict) -> None:
+        # Rate limit login attempts
+        if not self.state.auth_rate_limiter.check("login"):
+            return self._error(429, "too many login attempts")
+        email = str(body.get("email") or "")
+        password = str(body.get("password") or "")
+        try:
+            session = self.state.accounts.login(email, password)
+            self.state.store.log_event("account_login", "", session["learner_id"])
+            self._json(session)
+        except SecurityError as exc:
+            self._error(401, str(exc))
+
+    def _account_logout(self, body: dict) -> None:
+        token = str(body.get("session_token") or "")
+        if token:
+            self.state.accounts.logout(token)
+        self._json({"logged_out": True})
+
+    def _account_session(self, body: dict) -> None:
+        token = str(body.get("session_token") or "")
+        session = self.state.accounts.validate_session(token)
+        if session is None:
+            return self._error(401, "invalid or expired session")
+        self._json(session)
+
+    def _account_reset_request(self, body: dict) -> None:
+        # Rate limit reset requests
+        if not self.state.auth_rate_limiter.check("reset"):
+            return self._error(429, "too many reset requests")
+        email = str(body.get("email") or "")
+        result = self.state.accounts.request_password_reset(email)
+        self._json(result)
+
+    def _account_reset(self, body: dict) -> None:
+        token = str(body.get("token") or "")
+        new_password = str(body.get("new_password") or "")
+        try:
+            result = self.state.accounts.reset_password(token, new_password)
+            self._json(result)
+        except SecurityError as exc:
+            self._error(400, str(exc))
 
 
 def make_server(db_path: str, static_dir: str, host: str = "127.0.0.1",
