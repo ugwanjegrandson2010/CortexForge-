@@ -5,9 +5,12 @@
  *    hostile source document cannot inject markup into the UI.
  *  - The API token is held in memory only (never localStorage) and sent as
  *    a header, so a page reload requires a fresh token from the server log.
- *  - No third-party scripts, no eval, no dynamic Function construction.
+ *  - No third-party scripts except Three.js (loaded from /static/lib/three.min.js).
+ *  - No eval, no dynamic Function construction.
  */
 'use strict';
+
+/* ------------------------------------------------------------------ state */
 
 const TOKEN_KEY = 'cortexforge_token';
 let TOKEN = '';
@@ -18,7 +21,7 @@ let SESSION_INDEX = 0;
 let SESSION_RESULTS = [];
 let SELECTED_STYLES = new Set();
 
-/* ---------------------------------------------------------------- utils */
+/* ------------------------------------------------------------ DOM helpers */
 
 function $(id) { return document.getElementById(id); }
 
@@ -37,6 +40,8 @@ function status(msg, kind) {
   s.className = 'status' + (kind ? ' ' + kind : '');
 }
 
+/* ------------------------------------------------------------- API client */
+
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'Accept': 'application/json' }, opts.headers || {});
   if (opts.method && opts.method !== 'GET') {
@@ -53,6 +58,250 @@ async function api(path, opts = {}) {
   }
   return data;
 }
+
+/* --------------------------------------------------------- reduced motion */
+
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* -------------------------------------------------- Three.js background */
+
+(function initBackground() {
+  if (REDUCED) return;
+  const canvas = $('bg-canvas');
+  if (!canvas || typeof THREE === 'undefined') return;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.z = 5;
+
+  // Subtle particle field — dim, slow, accent-coloured
+  const COUNT = 60;
+  const positions = new Float32Array(COUNT * 3);
+  const velocities = new Float32Array(COUNT * 3);
+  for (let i = 0; i < COUNT; i++) {
+    positions[i * 3]     = (Math.random() - 0.5) * 12;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 8;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 4;
+    velocities[i * 3]     = (Math.random() - 0.5) * 0.003;
+    velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.003;
+    velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.001;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0x4c8dff,
+    size: 0.06,
+    transparent: true,
+    opacity: 0.35,
+    sizeAttenuation: true,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+
+  // A few larger, dimmer geometric shapes for depth
+  const shapeMat = new THREE.MeshBasicMaterial({
+    color: 0x4c8dff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.06,
+  });
+  const shapes = [];
+  for (let i = 0; i < 3; i++) {
+    const g = new THREE.IcosahedronGeometry(0.8 + i * 0.4, 0);
+    const m = new THREE.Mesh(g, shapeMat.clone());
+    m.position.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 5, -1 - i);
+    m.userData.rotSpeed = 0.0004 + Math.random() * 0.0006;
+    scene.add(m);
+    shapes.push(m);
+  }
+
+  let rafId = null;
+  let running = true;
+
+  function tick() {
+    if (!running) return;
+    rafId = requestAnimationFrame(tick);
+
+    const pos = geo.attributes.position.array;
+    for (let i = 0; i < COUNT; i++) {
+      pos[i * 3]     += velocities[i * 3];
+      pos[i * 3 + 1] += velocities[i * 3 + 1];
+      pos[i * 3 + 2] += velocities[i * 3 + 2];
+      // Wrap around edges
+      if (pos[i * 3] > 6) pos[i * 3] = -6; else if (pos[i * 3] < -6) pos[i * 3] = 6;
+      if (pos[i * 3 + 1] > 4) pos[i * 3 + 1] = -4; else if (pos[i * 3 + 1] < -4) pos[i * 3 + 1] = 4;
+    }
+    geo.attributes.position.needsUpdate = true;
+
+    shapes.forEach(s => {
+      s.rotation.x += s.userData.rotSpeed;
+      s.rotation.y += s.userData.rotSpeed * 0.7;
+    });
+
+    renderer.render(scene, camera);
+  }
+
+  function start() { if (!running && !rafId) { running = true; tick(); } }
+  function stop()  { running = false; if (rafId) { cancelAnimationFrame(rafId); rafId = null; } }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stop(); else start();
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    stop();
+    geo.dispose();
+    mat.dispose();
+    shapes.forEach(s => { s.geometry.dispose(); s.material.dispose(); });
+    renderer.dispose();
+  });
+
+  tick();
+})();
+
+/* ------------------------------------------------- magic pointer glow */
+
+(function initMagicPointer() {
+  if (REDUCED) return;
+
+  const GLOW_RADIUS = 120;
+  const GLOW_OPACITY = 0.12;
+
+  // Create overlay canvas for the glow
+  const canvas = document.createElement('canvas');
+  canvas.id = 'glow-canvas';
+  canvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9998;';
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+
+  let mouseX = -9999, mouseY = -9999;
+  let targetX = -9999, targetY = -9999;
+  let rafId = null;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  document.addEventListener('mousemove', (e) => {
+    targetX = e.clientX;
+    targetY = e.clientY;
+  });
+
+  document.addEventListener('mouseleave', () => {
+    targetX = -9999;
+    targetY = -9999;
+  });
+
+  // Find nearest interactive element
+  function nearestInteractive(x, y) {
+    const els = document.querySelectorAll('button, .tab, .card, .chip, a, input, select, textarea, [role="tab"]');
+    let best = null, bestDist = GLOW_RADIUS;
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      const cx = Math.max(r.left, Math.min(x, r.right));
+      const cy = Math.max(r.top, Math.min(y, r.bottom));
+      const d = Math.hypot(x - cx, y - cy);
+      if (d < bestDist) { bestDist = d; best = { cx, cy, dist: d }; }
+    }
+    return best;
+  }
+
+  function draw() {
+    rafId = requestAnimationFrame(draw);
+    // Smooth follow
+    mouseX += (targetX - mouseX) * 0.15;
+    mouseY += (targetY - mouseY) * 0.15;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (mouseX < -100) return;
+
+    const near = nearestInteractive(mouseX, mouseY);
+    if (!near) return;
+
+    const intensity = 1 - near.dist / GLOW_RADIUS;
+    const radius = 60 + intensity * 80;
+
+    const grad = ctx.createRadialGradient(near.cx, near.cy, 0, near.cx, near.cy, radius);
+    grad.addColorStop(0, 'rgba(76, 141, 255, ' + (GLOW_OPACITY * intensity) + ')');
+    grad.addColorStop(1, 'rgba(76, 141, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(near.cx - radius, near.cy - radius, radius * 2, radius * 2);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (rafId) { cancelAnimationFrame(rafId); rafId = null; } }
+    else if (!rafId) { rafId = requestAnimationFrame(draw); }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    canvas.remove();
+  });
+
+  draw();
+})();
+
+/* ------------------------------------------------------ microinteractions */
+
+(function initMicrointeractions() {
+  if (REDUCED) return;
+
+  // Add press-scale and ripple to all buttons via event delegation
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || btn.disabled) return;
+
+    // Press scale
+    btn.style.transform = 'scale(0.96)';
+    setTimeout(() => { btn.style.transform = ''; }, 120);
+
+    // Ripple on primary buttons
+    if (btn.classList.contains('primary')) {
+      const rect = btn.getBoundingClientRect();
+      const ripple = document.createElement('span');
+      const size = Math.max(rect.width, rect.height);
+      ripple.style.cssText = 'position:absolute;border-radius:50%;background:rgba(255,255,255,0.25);'
+        + 'width:' + size + 'px;height:' + size + 'px;'
+        + 'left:' + (e.clientX - rect.left - size / 2) + 'px;'
+        + 'top:' + (e.clientY - rect.top - size / 2) + 'px;'
+        + 'pointer-events:none;animation:ripple 0.4s ease-out forwards;';
+      btn.style.position = btn.style.position || 'relative';
+      btn.style.overflow = btn.style.overflow || 'hidden';
+      btn.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 400);
+    }
+  }, true);
+
+  // Inject ripple keyframes if not present
+  if (!document.getElementById('micro-style')) {
+    const style = document.createElement('style');
+    style.id = 'micro-style';
+    style.textContent = '@keyframes ripple{from{transform:scale(0);opacity:1}to{transform:scale(2.5);opacity:0}}'
+      + 'button{transition:transform 0.15s cubic-bezier(0.16,1,0.3,1)}'
+      + '.card{transition:transform 0.2s cubic-bezier(0.16,1,0.3,1)}'
+      + '.card:hover{transform:translateY(-2px)}'
+      + '.tab{transition:color 0.2s cubic-bezier(0.16,1,0.3,1)}'
+      + '.chip{transition:all 0.2s cubic-bezier(0.16,1,0.3,1)}'
+      + 'button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}';
+    document.head.appendChild(style);
+  }
+})();
 
 /* ------------------------------------------------------------ tab logic */
 
@@ -71,7 +320,13 @@ async function boot() {
   try {
     MANIFEST = await api('/api/manifest');
     const stored = sessionStorage.getItem(TOKEN_KEY);
-    if (stored) TOKEN = stored;
+    if (stored) {
+      TOKEN = stored;
+      $('token-input').value = stored;
+    }
+    $('token-input').addEventListener('change', () => {
+      setToken($('token-input').value.trim());
+    });
     renderStylePicker();
     renderMcpPlan();
     status('ready', 'ok');
@@ -607,5 +862,7 @@ $('write-mcp').addEventListener('click', async () => {
     status('mcp.json written', 'ok');
   } catch (e) { status(e.message, 'err'); }
 });
+
+/* ------------------------------------------------------------------ go */
 
 boot();

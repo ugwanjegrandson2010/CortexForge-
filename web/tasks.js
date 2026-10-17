@@ -30,10 +30,10 @@ function shuffle(arr) {
 function showInstructions(container, title, text, buttonText) {
   return new Promise((resolve) => {
     container.replaceChildren();
-    const card = el('div', { class: 'card' });
+    const card = el('div', { class: 'card task-instructions-card' });
     card.appendChild(el('h2', { text: title }));
     card.appendChild(el('p', { class: 'lede', text: text }));
-    const btn = el('button', { class: 'primary', text: buttonText || 'Begin' });
+    const btn = el('button', { class: 'primary magic-border', text: buttonText || 'Begin' });
     card.appendChild(btn);
     container.appendChild(card);
     btn.addEventListener('click', () => { container.replaceChildren(); resolve(); });
@@ -107,10 +107,9 @@ TaskEngine.register('flanker', async function(container, config = {}) {
 
 function runFlankerTrial(container, arrows, congruent, fixationMs, stimulusMs, itiMs) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
-    // Fixation
     area.appendChild(el('div', {
       class: 'task-fixation',
       attrs: { 'aria-hidden': 'true' },
@@ -139,7 +138,6 @@ function runFlankerTrial(container, arrows, congruent, fixationMs, stimulusMs, i
       }, itiMs);
     };
 
-    // Show fixation, then stimulus
     setTimeout(() => {
       if (responded) return;
       area.replaceChildren();
@@ -154,8 +152,8 @@ function runFlankerTrial(container, arrows, congruent, fixationMs, stimulusMs, i
       area.appendChild(arrowRow);
 
       const btnRow = el('div', { class: 'row' });
-      const leftBtn = el('button', { text: '← Left', attrs: { 'aria-label': 'Respond left' } });
-      const rightBtn = el('button', { text: 'Right →', attrs: { 'aria-label': 'Respond right' } });
+      const leftBtn = el('button', { class: 'magic-border', text: '← Left', attrs: { 'aria-label': 'Respond left' } });
+      const rightBtn = el('button', { class: 'magic-border', text: 'Right →', attrs: { 'aria-label': 'Respond right' } });
       leftBtn.addEventListener('click', () => respond('left'));
       rightBtn.addEventListener('click', () => respond('right'));
       btnRow.appendChild(leftBtn);
@@ -250,7 +248,7 @@ function renderGrid(container, grid, label) {
 
 function runPatternTrial(container, gridA, gridB, isSame) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
     const gridsRow = el('div', { class: 'task-grids-row' });
@@ -259,8 +257,8 @@ function runPatternTrial(container, gridA, gridB, isSame) {
     area.appendChild(gridsRow);
 
     const btnRow = el('div', { class: 'row' });
-    const sameBtn = el('button', { text: 'S — Same', attrs: { 'aria-label': 'Patterns are the same' } });
-    const diffBtn = el('button', { text: 'D — Different', attrs: { 'aria-label': 'Patterns are different' } });
+    const sameBtn = el('button', { class: 'magic-border', text: 'S — Same', attrs: { 'aria-label': 'Patterns are the same' } });
+    const diffBtn = el('button', { class: 'magic-border', text: 'D — Different', attrs: { 'aria-label': 'Patterns are different' } });
     btnRow.appendChild(sameBtn);
     btnRow.appendChild(diffBtn);
     area.appendChild(btnRow);
@@ -312,13 +310,11 @@ TaskEngine.register('ultimatum', async function(container, config = {}) {
 
   const trials = [];
 
-  // Proposer trials
   for (let i = 0; i < half; i++) {
     const trial = await runProposerTrial(container, i, half);
     trials.push(trial);
   }
 
-  // Responder trials
   for (let i = 0; i < half; i++) {
     const trial = await runResponderTrial(container, i, half);
     trials.push(trial);
@@ -329,7 +325,7 @@ TaskEngine.register('ultimatum', async function(container, config = {}) {
 
 function runProposerTrial(container, idx, total) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
     area.appendChild(el('h3', { text: 'Proposer ' + (idx + 1) + ' of ' + total }));
@@ -362,7 +358,7 @@ function runProposerTrial(container, idx, total) {
       otherVal.textContent = '$' + (10 - Number(slider.value)).toFixed(2);
     });
 
-    const btn = el('button', { class: 'primary', text: 'Submit offer' });
+    const btn = el('button', { class: 'primary magic-border', text: 'Submit offer' });
     btn.addEventListener('click', () => {
       const offer = Number(slider.value);
       area.replaceChildren();
@@ -374,10 +370,10 @@ function runProposerTrial(container, idx, total) {
 
 function runResponderTrial(container, idx, total) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
-    const offer = Math.round(Math.random() * 20) / 2; // 0 to 10 in 0.5 steps
+    const offer = Math.round(Math.random() * 20) / 2;
 
     area.appendChild(el('h3', { text: 'Responder ' + (idx + 1) + ' of ' + total }));
     area.appendChild(el('p', {
@@ -390,8 +386,8 @@ function runResponderTrial(container, idx, total) {
     }));
 
     const btnRow = el('div', { class: 'row' });
-    const acceptBtn = el('button', { class: 'primary', text: 'Accept' });
-    const rejectBtn = el('button', { text: 'Reject' });
+    const acceptBtn = el('button', { class: 'primary magic-border', text: 'Accept' });
+    const rejectBtn = el('button', { class: 'magic-border', text: 'Reject' });
 
     acceptBtn.addEventListener('click', () => {
       area.replaceChildren();
@@ -462,7 +458,7 @@ TaskEngine.register('social_value_orientation', async function(container, config
 
 function runSVOTrial(container, idx, total, allocation) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
     area.appendChild(el('h3', { text: 'Item ' + (idx + 1) + ' of ' + total }));
@@ -499,7 +495,7 @@ function runSVOTrial(container, idx, total, allocation) {
 
     area.appendChild(fieldset);
 
-    const btn = el('button', { class: 'primary', text: 'Confirm' });
+    const btn = el('button', { class: 'primary magic-border', text: 'Confirm' });
     btn.disabled = true;
 
     fieldset.addEventListener('change', () => { btn.disabled = false; });
@@ -626,7 +622,7 @@ TaskEngine.register('false_belief', async function(container, config = {}) {
 
 function runFalseBeliefTrial(container, idx, total, vignette) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
     area.appendChild(el('h3', { text: 'Story ' + (idx + 1) + ' of ' + total }));
@@ -653,7 +649,7 @@ function runFalseBeliefTrial(container, idx, total, vignette) {
 
     area.appendChild(fieldset);
 
-    const btn = el('button', { class: 'primary', text: 'Submit answer' });
+    const btn = el('button', { class: 'primary magic-border', text: 'Submit answer' });
     btn.disabled = true;
 
     fieldset.addEventListener('change', () => { btn.disabled = false; });
@@ -722,7 +718,7 @@ TaskEngine.register('loneliness_ucla', async function(container, config = {}) {
 
 function runUCLATrial(container, idx, total, item) {
   return new Promise((resolve) => {
-    const area = el('div', { class: 'card' });
+    const area = el('div', { class: 'card task-stimulus-card' });
     container.appendChild(area);
 
     area.appendChild(el('h3', { text: 'Item ' + (idx + 1) + ' of ' + total }));
@@ -747,7 +743,7 @@ function runUCLATrial(container, idx, total, item) {
 
     area.appendChild(fieldset);
 
-    const btn = el('button', { class: 'primary', text: 'Next' });
+    const btn = el('button', { class: 'primary magic-border', text: 'Next' });
     btn.disabled = true;
 
     fieldset.addEventListener('change', () => { btn.disabled = false; });
