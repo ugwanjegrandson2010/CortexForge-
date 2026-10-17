@@ -373,6 +373,25 @@ class Store:
             "ORDER BY profile_id DESC LIMIT 1", (learner_id, kind))
         return load_json_only(row["payload"]) if row else None
 
+    # -- environment audit ------------------------------------------------
+
+    def get_environment_audit(self, learner_id: str) -> dict | None:
+        """Get the latest environment audit for a learner."""
+        row = self._one(
+            "SELECT payload FROM profile WHERE learner_id = ? "
+            "AND kind = 'environment_audit' ORDER BY profile_id DESC LIMIT 1",
+            (learner_id,))
+        return load_json_only(row["payload"]) if row else None
+
+    def save_environment_audit(self, learner_id: str, payload: dict) -> None:
+        """Save an environment audit snapshot."""
+        self._exec(
+            "INSERT INTO profile(learner_id, kind, payload, created_at) "
+            "VALUES(?,?,?,?)",
+            (learner_id, "environment_audit",
+             json.dumps(payload, separators=(",", ":"), default=str),
+             time.time()))
+
     # -- audit -----------------------------------------------------------
     def log_event(self, kind: str, detail: str = "",
                   learner_id: str = "") -> None:

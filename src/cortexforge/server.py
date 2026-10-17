@@ -143,10 +143,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(safe_k, safe_v)
         self.end_headers()
 
+    def _safe_write(self, data: bytes) -> None:
+        """Write response data, handling BrokenPipeError gracefully."""
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def _json(self, obj: Any, status: int = 200) -> None:
         body = json.dumps(obj, default=str).encode("utf-8")
         self._headers(status, "application/json; charset=utf-8", len(body))
-        self.wfile.write(body)
+        self._safe_write(body)
 
     def _error(self, status: int, message: str) -> None:
         self._json({"error": message, "status": status}, status)
@@ -329,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         data = target.read_bytes()
         self._headers(200, ctype, len(data))
-        self.wfile.write(data)
+        self._safe_write(data)
 
     # -- handlers --------------------------------------------------------
     def _learner_id(self, body: dict) -> str:
@@ -778,7 +785,11 @@ class Handler(BaseHTTPRequestHandler):
         nps = self.state.neuroprotection.get(lid)
         if nps is None:
             nps = self.state.neuroprotection.setdefault(lid, NeuroProtectionSystem())
-        status = nps.check_session(hour=int(query.get("hour") or [0])[0])
+        try:
+            hour = int((query.get("hour") or ["12"])[0])
+        except (ValueError, TypeError):
+            hour = 12
+        status = nps.check_session(hour=hour)
         self._json(status.to_dict())
 
     def _neuroprotection_trial(self, body: dict) -> None:
