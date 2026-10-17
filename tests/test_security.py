@@ -311,6 +311,41 @@ class TestSecrets(unittest.TestCase):
         self.assertEqual(redact(""), "")
 
 
+class TestAccountCreation(unittest.TestCase):
+    """Account creation and login must work without a pre-existing token."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        from cortexforge.accounts import AccountManager
+        from cortexforge.store import Store
+        self.store = Store(str(Path(self.tmp.name) / 'test.db'))
+        self.am = AccountManager(self.store)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_create_account_succeeds(self):
+        account = self.am.create_account('a@b.com', 'Password123', 'A')
+        self.assertTrue(account['account_id'])
+        self.assertEqual(account['email'], 'a@b.com')
+        self.assertEqual(account['learner_id'], 'a')
+
+    def test_login_succeeds_after_creation(self):
+        self.am.create_account('a@b.com', 'Password123', 'A')
+        session = self.am.login('a@b.com', 'Password123')
+        self.assertTrue(session['session_token'])
+        self.assertEqual(session['learner_id'], 'a')
+
+    def test_login_wrong_password_fails(self):
+        from cortexforge.security import SecurityError
+        self.am.create_account('a@b.com', 'Password123', 'A')
+        with self.assertRaises(SecurityError):
+            self.am.login('a@b.com', 'WrongPass123')
+
+
 class TestSQLGuard(unittest.TestCase):
     """CVE-2022-31197 class: SQL injection via interpolation."""
 

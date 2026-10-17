@@ -603,7 +603,7 @@ class AccountManager:
         self.store._exec(
             "INSERT OR IGNORE INTO account_link(account_id, learner_id, "
             "created_at) VALUES(?,?,?)",
-            (account_id, learner_id),
+            (account_id, learner_id, now),
         )
 
     def get_learners(self, account_id: str) -> list[str]:

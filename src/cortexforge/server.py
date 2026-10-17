@@ -245,14 +245,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._check_host():
             return
-        if not self._check_auth():
-            return
         # CVE-2021-28861: collapse leading slashes
         raw_path = self.path
         while raw_path.startswith('//'):
             raw_path = '/' + raw_path.lstrip('/')
         parsed = urllib.parse.urlparse(raw_path)
         path = parsed.path
+        # Auth endpoints must not require a token (chicken-and-egg)
+        AUTH_ENDPOINTS = {'/api/account/create', '/api/account/login',
+                          '/api/account/reset-request', '/api/account/reset'}
+        if path not in AUTH_ENDPOINTS:
+            if not self._check_auth():
+                return
         try:
             body = self._read_body()
             if path == "/api/onboarding/start":
