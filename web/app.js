@@ -506,6 +506,34 @@ function renderGenerated(data) {
 
 /* ---------------------------------------------------------------- study */
 
+const STAGES = [
+  { id: 'launch', label: 'Launch' },
+  { id: 'retrieval', label: 'Retrieval' },
+  { id: 'hook', label: 'Hook' },
+  { id: 'construction', label: 'Construct' },
+  { id: 'testing', label: 'Testing' },
+  { id: 'close', label: 'Close' },
+];
+
+function renderStageIndicators(currentStage) {
+  const wrap = $('session-stages');
+  wrap.replaceChildren();
+  const dots = el('div', { class: 'stage-indicators' });
+  const labels = el('div', { class: 'stage-labels' });
+  STAGES.forEach((s, i) => {
+    const dot = el('div', { class: 'stage-dot' });
+    if (i < currentStage) dot.classList.add('completed');
+    else if (i === currentStage) dot.classList.add('active');
+    dots.appendChild(dot);
+    const label = el('div', { class: 'stage-label', text: s.label });
+    if (i < currentStage) label.classList.add('completed');
+    else if (i === currentStage) label.classList.add('active');
+    labels.appendChild(label);
+  });
+  wrap.appendChild(dots);
+  wrap.appendChild(labels);
+}
+
 $('load-session').addEventListener('click', async () => {
   if (!LEARNER) { status('sign in first', 'err'); return; }
   const btn = $('load-session');
@@ -525,6 +553,7 @@ $('load-session').addEventListener('click', async () => {
       }));
       return;
     }
+    renderStageIndicators(0);
     renderQuestion();
     status('session loaded', 'ok');
   } catch (e) { status(e.message, 'err'); }

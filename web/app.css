@@ -1287,6 +1287,58 @@ th {
   border-width: 0;
 }
 
+/* ---------- Stage Indicators ---------- */
+.stage-indicators {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-3) 0;
+  flex-wrap: wrap;
+}
+
+.stage-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel-3);
+  border: 2px solid var(--line);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.stage-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.2);
+}
+
+.stage-dot.completed {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.stage-labels {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.stage-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 60px;
+  text-align: center;
+}
+
+.stage-label.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.stage-label.completed {
+  color: var(--success);
+}
+
 /* ---------- Onboarding ---------- */
 .onboarding-wrap {
   max-width: 680px;
