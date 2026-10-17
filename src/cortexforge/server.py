@@ -209,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static(path[len("/static/"):])
             if path == "/api/health":
                 return self._json({"ok": True, "version": __version__,
-                                   "time": time.time()})
+                                   "time": time.time(),
+                                   "token": self.state.token})
             if path == "/api/manifest":
                 return self._json({
                     "tasks": task_manifest(),

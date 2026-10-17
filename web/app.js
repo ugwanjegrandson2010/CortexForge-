@@ -309,7 +309,11 @@ async function boot() {
   try {
     MANIFEST = await api('/api/manifest');
     const stored = sessionStorage.getItem(TOKEN_KEY);
-    if (stored) { TOKEN = stored; }
+    if (stored) { TOKEN = stored; } else {
+      const health = await api('/api/health');
+      TOKEN = health.token || '';
+      if (TOKEN) { try { sessionStorage.setItem(TOKEN_KEY, TOKEN); } catch (e) {} }
+    }
     const storedSession = sessionStorage.getItem(SESSION_KEY);
     if (storedSession) {
       SESSION_TOKEN = storedSession;
