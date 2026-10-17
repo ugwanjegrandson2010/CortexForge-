@@ -69,6 +69,7 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* -------------------------------------------------- Three.js background */
 
 (function initBackground() {
+  try {
   if (REDUCED) return;
   const canvas = $('bg-canvas');
   if (!canvas || typeof THREE === 'undefined') return;
@@ -138,6 +139,7 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   });
 
   tick();
+  } catch (e) { /* Three.js optional */ }
 })();
 
 /* ------------------------------------------------------ auth logic */
