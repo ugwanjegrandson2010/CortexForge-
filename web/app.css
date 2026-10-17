@@ -1287,6 +1287,50 @@ th {
   border-width: 0;
 }
 
+/* ---------- Onboarding ---------- */
+.onboarding-wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.onboarding-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-lg);
+}
+
+.onboarding-header {
+  margin-bottom: var(--space-6);
+}
+
+.onboarding-progress {
+  margin-bottom: var(--space-6);
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel-3);
+  overflow: hidden;
+  margin-bottom: var(--space-2);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.progress-text {
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  text-align: center;
+}
+
 /* ---------- Light Theme ---------- */
 [data-theme="light"] {
   --bg: #f8f9fc;

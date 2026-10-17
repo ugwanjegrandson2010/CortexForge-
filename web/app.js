@@ -306,6 +306,15 @@ async function boot() {
         ACCOUNT = sess;
         LEARNER = sess.learner_id;
         $('learner-tag').textContent = sess.display_name || sess.email;
+        // Check if onboarding is complete
+        const profile = await api('/api/profile?learner_id=' + encodeURIComponent(LEARNER));
+        if (!profile.profile || !profile.profile.observations || profile.profile.observations.length === 0) {
+          // New user - show onboarding
+          $('view-main').classList.remove('active');
+          $('view-onboarding').classList.add('active');
+          startOnboarding();
+          return;
+        }
       } catch (e) {
         SESSION_TOKEN = '';
         try { sessionStorage.removeItem(SESSION_KEY); } catch (e2) {}
@@ -873,6 +882,127 @@ document.addEventListener('keydown', (e) => {
     if (paletteOpen) closePalette(); else openPalette();
   }
 });
+
+/* --------------------------------------------------------- onboarding */
+
+async function startOnboarding() {
+  if (!LEARNER) { status('sign in first', 'err'); return; }
+  try {
+    await api('/api/onboarding/start', {
+      method: 'POST',
+      body: JSON.stringify({ learner_id: LEARNER })
+    });
+    status('onboarding started', 'ok');
+    renderNextProbe();
+  } catch (e) { status(e.message, 'err'); }
+}
+
+async function renderNextProbe() {
+  const area = $('probe-area');
+  area.replaceChildren();
+  let data;
+  try {
+    data = await api('/api/onboarding/next?learner_id=' + encodeURIComponent(LEARNER));
+  } catch (e) { status(e.message, 'err'); return; }
+  if (!data.probe) { finishOnboarding(); return; }
+  const p = data.probe;
+  const card = el('div', { class: 'card' });
+  card.appendChild(el('h2', { text: p.name }));
+  card.appendChild(el('p', { class: 'lede', text: p.purpose }));
+
+  // Progress
+  const progress = data.progress;
+  const pct = Math.round((progress.completed / progress.total) * 100);
+  $('onboarding-progress-fill').style.width = pct + '%';
+  $('onboarding-progress-text').textContent = `Step ${progress.completed + 1} of ${progress.total}`;
+
+  const inputWrap = el('div', { class: 'field' });
+  if (p.kind === 'interview' && p.options && p.options.length) {
+    const sel = el('select');
+    p.options.forEach(o => sel.appendChild(el('option', { text: o, attrs: { value: o } })));
+    inputWrap.appendChild(sel);
+  } else if (p.kind === 'interview' || p.kind === 'source') {
+    inputWrap.appendChild(el('textarea', { attrs: { rows: '4', placeholder: 'Type your answer…' } }));
+  } else if (p.kind === 'calibration') {
+    inputWrap.appendChild(el('p', { class: 'lede', text: 'Answer each on a 0–4 scale.' }));
+    const dims = ['holding a thought', 'finding a word', 'following a conversation',
+                  'remembering why you walked into a room', 'reading the same paragraph twice'];
+    dims.forEach(d => {
+      const row = el('div', { class: 'row' });
+      row.appendChild(el('span', { text: d, attrs: { style: 'flex:1' } }));
+      row.appendChild(el('input', { attrs: { type: 'number', min: '0', max: '4', value: '0', style: 'width:70px' } }));
+      inputWrap.appendChild(row);
+    });
+  } else if (p.kind === 'task') {
+    inputWrap.appendChild(el('p', { class: 'lede', text: 'This task runs in your browser. Click "Start task" to begin.' }));
+    const startBtn = el('button', { class: 'primary', text: 'Start task' });
+    inputWrap.appendChild(startBtn);
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      try {
+        if (typeof TaskEngine !== 'undefined' && TaskEngine.has(p.task_id)) {
+          const trials = await TaskEngine.run(p.task_id, inputWrap, { trials: p.trials || 40 });
+          inputWrap.appendChild(el('p', { class: 'lede', text: `Task complete. ${trials.length} trials recorded.` }));
+        }
+      } catch (e) {
+        inputWrap.appendChild(el('p', { class: 'lede', text: 'Task error: ' + e.message }));
+        startBtn.disabled = false;
+      }
+    });
+  }
+
+  card.appendChild(inputWrap);
+  const row = el('div', { class: 'row' });
+  const nextBtn = el('button', { class: 'primary', text: 'Continue' });
+  const skipBtn = el('button', { text: 'Skip this' });
+  row.appendChild(nextBtn);
+  row.appendChild(skipBtn);
+  card.appendChild(row);
+  area.appendChild(card);
+
+  nextBtn.addEventListener('click', async () => {
+    nextBtn.disabled = true;
+    try {
+      await api('/api/onboarding/record', {
+        method: 'POST',
+        body: JSON.stringify({ learner_id: LEARNER, probe_id: p.probe_id, answer: null })
+      });
+      renderNextProbe();
+    } catch (e) { status(e.message, 'err'); nextBtn.disabled = false; }
+  });
+
+  skipBtn.addEventListener('click', async () => {
+    skipBtn.disabled = true;
+    try {
+      await api('/api/onboarding/record', {
+        method: 'POST',
+        body: JSON.stringify({ learner_id: LEARNER, probe_id: p.probe_id, answer: null })
+      });
+      renderNextProbe();
+    } catch (e) { status(e.message, 'err'); skipBtn.disabled = false; }
+  });
+}
+
+async function finishOnboarding() {
+  try {
+    const data = await api('/api/onboarding/finish', {
+      method: 'POST',
+      body: JSON.stringify({ learner_id: LEARNER })
+    });
+    const area = $('contract-area');
+    area.replaceChildren();
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('h2', { text: 'Your learning contract' }));
+    card.appendChild(el('pre', { class: 'code', text: data.summary }));
+    area.appendChild(card);
+    status('onboarding complete', 'ok');
+    // Switch to main app after a delay
+    setTimeout(() => {
+      $('view-onboarding').classList.remove('active');
+      $('view-main').classList.add('active');
+    }, 3000);
+  } catch (e) { status(e.message, 'err'); }
+}
 
 /* ------------------------------------------------------------- theme */
 
