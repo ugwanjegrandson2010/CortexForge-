@@ -1341,6 +1341,52 @@ th {
   .main-content { padding-bottom: 80px; }
 }
 
+/* ---------- Calibration Chart ---------- */
+.calibration-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  min-height: 120px;
+}
+
+.calibration-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.calibration-label {
+  width: 80px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.calibration-bar-bg {
+  flex: 1;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  overflow: hidden;
+}
+
+.calibration-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.calibration-value {
+  width: 40px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--text);
+}
+
 /* ---------- Analytics Grid ---------- */
 .analytics-grid {
   display: grid;

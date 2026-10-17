@@ -388,6 +388,34 @@ async function loadDashboard() {
     setRing('ring-weekly', weeklyPct, circumference);
     setRing('ring-mastered', masteredPct, circumference);
 
+    // Calibration chart
+    const calEl = $('dash-calibration');
+    if (calEl) {
+      calEl.replaceChildren();
+      const cal = session.calibration || {};
+      const calData = [
+        { label: 'Calibration', value: cal.bias !== undefined ? Math.round(cal.bias * 100) / 100 : null },
+        { label: 'Confidence', value: cal.mean_confidence !== undefined ? Math.round(cal.mean_confidence * 100) + '%' : null },
+        { label: 'Accuracy', value: s.accuracy > 0 ? Math.round(s.accuracy * 100) + '%' : null },
+      ];
+      calData.forEach(c => {
+        if (c.value === null) return;
+        const row = el('div', { class: 'calibration-row' });
+        row.appendChild(el('div', { class: 'calibration-label', text: c.label }));
+        const barBg = el('div', { class: 'calibration-bar-bg' });
+        const fill = el('div', { class: 'calibration-bar-fill' });
+        const pct = typeof c.value === 'string' ? parseInt(c.value) : Math.min(Math.round(c.value * 100), 100);
+        fill.style.width = (pct || 0) + '%';
+        barBg.appendChild(fill);
+        row.appendChild(barBg);
+        row.appendChild(el('div', { class: 'calibration-value', text: String(c.value) }));
+        calEl.appendChild(row);
+      });
+      if (!calEl.children.length) {
+        calEl.appendChild(el('div', { class: 'meta', text: 'Complete review sessions to see calibration data.' }));
+      }
+    }
+
     // Session analytics
     const analyticsEl = $('dash-analytics');
     analyticsEl.replaceChildren();
