@@ -567,6 +567,15 @@ function renderStageIndicators(currentStage) {
   wrap.appendChild(labels);
 }
 
+$('new-questions').addEventListener('click', () => {
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelector('.nav-item[data-view="sources"]').classList.add('active');
+  $('view-sources').classList.add('active');
+  refreshSources();
+  status('add sources to generate more questions');
+});
+
 $('load-session').addEventListener('click', async () => {
   if (!LEARNER) { status('sign in first', 'err'); return; }
   const btn = $('load-session');
