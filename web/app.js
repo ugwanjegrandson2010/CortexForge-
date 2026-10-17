@@ -3,8 +3,8 @@
  * Security notes:
  *  - All server data is inserted with textContent, never innerHTML, so a
  *    hostile source document cannot inject markup into the UI.
- *  - The API token is held in memory only (never localStorage) and sent as
- *    a header, so a page reload requires a fresh token from the server log.
+ *  - The API token is held in sessionStorage only and sent as a header,
+ *    so a page reload requires a fresh token from the server.
  *  - No third-party scripts except Three.js (loaded from /static/lib/three.min.js).
  *  - No eval, no dynamic Function construction.
  */
@@ -160,7 +160,7 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   });
 
   // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
+  window.addEventListener('pagehide', () => {
     stop();
     geo.dispose();
     mat.dispose();
@@ -249,7 +249,7 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     else if (!rafId) { rafId = requestAnimationFrame(draw); }
   });
 
-  window.addEventListener('beforeunload', () => {
+  window.addEventListener('pagehide', () => {
     if (rafId) cancelAnimationFrame(rafId);
     canvas.remove();
   });
@@ -348,6 +348,9 @@ $('start-onboarding').addEventListener('click', async () => {
   LEARNER = name.replace(/[^A-Za-z0-9_\-]/g, '');
   if (!LEARNER) { status('name must be alphanumeric', 'err'); return; }
   $('learner-tag').textContent = LEARNER;
+  const btn = $('start-onboarding');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
   try {
     const data = await api('/api/onboarding/start', {
       method: 'POST',
@@ -356,6 +359,10 @@ $('start-onboarding').addEventListener('click', async () => {
     status('setup started', 'ok');
     nextProbe();
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Begin setup';
+  }
 });
 
 async function nextProbe() {
@@ -471,23 +478,27 @@ async function nextProbe() {
 
   nextBtn.addEventListener('click', async () => {
     const answer = getAnswer();
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Saving…';
     try {
       await api('/api/onboarding/record', {
         method: 'POST',
         body: JSON.stringify({ learner_id: LEARNER, probe_id: p.probe_id, answer: answer })
       });
       nextProbe();
-    } catch (e) { status(e.message, 'err'); }
+    } catch (e) { status(e.message, 'err'); nextBtn.disabled = false; nextBtn.textContent = 'Continue'; }
   });
 
   skipBtn.addEventListener('click', async () => {
+    skipBtn.disabled = true;
+    skipBtn.textContent = 'Skipping…';
     try {
       await api('/api/onboarding/record', {
         method: 'POST',
         body: JSON.stringify({ learner_id: LEARNER, probe_id: p.probe_id, answer: null })
       });
       nextProbe();
-    } catch (e) { status(e.message, 'err'); }
+    } catch (e) { status(e.message, 'err'); skipBtn.disabled = false; skipBtn.textContent = 'Skip this'; }
   });
 }
 
@@ -514,6 +525,9 @@ async function finishOnboarding() {
 $('add-source').addEventListener('click', async () => {
   const text = $('source-text').value;
   if (!text.trim()) { status('paste some text', 'err'); return; }
+  const btn = $('add-source');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
   try {
     const data = await api('/api/source', {
       method: 'POST',
@@ -528,6 +542,10 @@ $('add-source').addEventListener('click', async () => {
     $('source-title').value = '';
     refreshSources();
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Add source';
+  }
 });
 
 async function refreshSources() {
@@ -564,6 +582,9 @@ function renderStylePicker() {
 $('generate').addEventListener('click', async () => {
   const sid = $('gen-source').value;
   if (!sid) { status('add a source first', 'err'); return; }
+  const btn = $('generate');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
   status('generating…');
   try {
     const body = { learner_id: LEARNER, source_id: sid, max_per_style: 3 };
@@ -572,6 +593,10 @@ $('generate').addEventListener('click', async () => {
     renderGenerated(data);
     status(data.generated + ' questions', 'ok');
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate';
+  }
 });
 
 function renderGenerated(data) {
@@ -600,6 +625,9 @@ function renderGenerated(data) {
 
 $('load-session').addEventListener('click', async () => {
   if (!LEARNER) { status('run setup first', 'err'); return; }
+  const btn = $('load-session');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
   try {
     const data = await api('/api/session?learner_id=' + encodeURIComponent(LEARNER) + '&limit=20');
     SESSION = data.items || [];
@@ -617,6 +645,10 @@ $('load-session').addEventListener('click', async () => {
     renderQuestion();
     status('session loaded', 'ok');
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Load session';
+  }
 });
 
 function renderQuestion() {
@@ -669,6 +701,7 @@ function questionCard(q, interactive) {
     const started = performance.now();
     const answer = ta.value;
     revealBtn.disabled = true;
+    revealBtn.textContent = 'Checking…';
     let verdict = 'incorrect';
     const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
     const a = norm(answer), b = norm(q.answer || '');
@@ -699,7 +732,7 @@ function questionCard(q, interactive) {
       const nextBtn = el('button', { class: 'primary', text: 'Next question' });
       nextBtn.addEventListener('click', () => { SESSION_INDEX++; renderQuestion(); });
       card.appendChild(nextBtn);
-    } catch (e) { status(e.message, 'err'); revealBtn.disabled = false; }
+    } catch (e) { status(e.message, 'err'); revealBtn.disabled = false; revealBtn.textContent = 'Submit'; }
   });
 
   return card;
@@ -762,11 +795,18 @@ function renderSummary() {
 
 $('load-profile').addEventListener('click', async () => {
   if (!LEARNER) { status('run setup first', 'err'); return; }
+  const btn = $('load-profile');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
   try {
     const data = await api('/api/profile?learner_id=' + encodeURIComponent(LEARNER));
     renderProfile(data);
     status('profile loaded', 'ok');
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Load profile';
+  }
 });
 
 function renderProfile(data) {
@@ -852,6 +892,9 @@ function renderMcpPlan() {
 }
 
 $('write-mcp').addEventListener('click', async () => {
+  const btn = $('write-mcp');
+  btn.disabled = true;
+  btn.textContent = 'Writing…';
   try {
     const data = await api('/api/mcp/config', {
       method: 'POST',
@@ -861,6 +904,10 @@ $('write-mcp').addEventListener('click', async () => {
       + data.servers.join(', ');
     status('mcp.json written', 'ok');
   } catch (e) { status(e.message, 'err'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Write mcp.json';
+  }
 });
 
 /* ------------------------------------------------------------------ go */
