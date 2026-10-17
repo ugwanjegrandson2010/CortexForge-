@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>CortexForge</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app">
+  <header class="bar">
+    <div class="brand">CortexForge</div>
+    <div class="bar-right">
+      <span id="learner-tag" class="tag"></span>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-view="onboard" role="tab">Setup</button>
+    <button class="tab" data-view="source" role="tab">Sources</button>
+    <button class="tab" data-view="study" role="tab">Study</button>
+    <button class="tab" data-view="profile" role="tab">Profile</button>
+    <button class="tab" data-view="mcp" role="tab">Integrations</button>
+  </nav>
+
+  <main>
+    <!-- SETUP -->
+    <section id="view-onboard" class="view active">
+      <div class="card">
+        <h1>Build your learning system</h1>
+        <p class="lede">
+          This takes about 45 minutes in total, and it is the only part of the
+          system that asks rather than measures. It exists because a system
+          built for passing an exam is not the system built for understanding a
+          field, and the difference is not something you can guess.
+        </p>
+        <label class="field">
+          <span>Your name or handle (used only on this device)</span>
+          <input id="learner-input" type="text" autocomplete="off" placeholder="e.g. sam">
+        </label>
+        <button id="start-onboarding" class="primary">Begin setup</button>
+      </div>
+      <div id="probe-area"></div>
+      <div id="contract-area"></div>
+    </section>
+
+    <!-- SOURCES -->
+    <section id="view-source" class="view">
+      <div class="card">
+        <h2>Add source material</h2>
+        <p class="lede">
+          Your own material produces the best questions, because they will be
+          in your vocabulary and about your syllabus. Paste text, or connect
+          Notion or Obsidian from the Integrations tab and pull from there.
+        </p>
+        <label class="field">
+          <span>Title</span>
+          <input id="source-title" type="text" placeholder="e.g. Chapter 4 — Photosynthesis">
+        </label>
+        <label class="field">
+          <span>Text</span>
+          <textarea id="source-text" rows="10" placeholder="Paste your notes, a chapter, or an article…"></textarea>
+        </label>
+        <button id="add-source" class="primary">Add source</button>
+      </div>
+      <div class="card">
+        <h2>Generate questions</h2>
+        <p class="lede">
+          Every style is generated from your text. A style that your material
+          cannot support is skipped and reported rather than faked.
+        </p>
+        <label class="field">
+          <span>Source</span>
+          <select id="gen-source"></select>
+        </label>
+        <label class="field">
+          <span>Styles (leave empty for all)</span>
+          <div id="style-picker" class="chips"></div>
+        </label>
+        <button id="generate" class="primary">Generate</button>
+      </div>
+      <div id="gen-result"></div>
+    </section>
+
+    <!-- STUDY -->
+    <section id="view-study" class="view">
+      <div class="card">
+        <h2>Today's session</h2>
+        <div id="session-meta" class="meta"></div>
+        <button id="load-session" class="primary">Load session</button>
+      </div>
+      <div id="question-area"></div>
+      <div id="summary-area"></div>
+    </section>
+
+    <!-- PROFILE -->
+    <section id="view-profile" class="view">
+      <div class="card">
+        <h2>Your behavioural profile</h2>
+        <p class="lede">
+          These are behavioural observations from short tasks, each carrying its
+          own confidence label. Nothing here is a personality test and nothing
+          here is a clinical assessment.
+        </p>
+        <button id="load-profile" class="primary">Load profile</button>
+      </div>
+      <div id="profile-area"></div>
+    </section>
+
+    <!-- MCP -->
+    <section id="view-mcp" class="view">
+      <div class="card">
+        <h2>Integrations</h2>
+        <p class="lede">
+          Every server is pre-declared. The only step left for you is to
+          authorise the ones that use OAuth.
+        </p>
+        <div id="mcp-plan"></div>
+        <button id="write-mcp" class="primary">Write mcp.json</button>
+        <pre id="mcp-out" class="code"></pre>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
