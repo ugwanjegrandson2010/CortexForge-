@@ -47,11 +47,13 @@ CREATE TABLE IF NOT EXISTS account (
     account_id    TEXT PRIMARY KEY,
     email         TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    api_token     TEXT NOT NULL,
     display_name  TEXT NOT NULL DEFAULT '',
     created_at    REAL NOT NULL,
     verified      INTEGER NOT NULL DEFAULT 0,
     last_login    REAL
 );
+CREATE INDEX IF NOT EXISTS idx_account_token ON account(api_token);
 
 CREATE TABLE IF NOT EXISTS account_link (
     account_id   TEXT NOT NULL,
@@ -308,9 +310,21 @@ class AccountManager:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        """Create account tables if they don't exist."""
+        """Create account tables if they don't exist, and migrate old accounts."""
         conn = self.store._conn
         conn.executescript(ACCOUNT_SCHEMA)
+        # Migration: generate api_token for accounts that don't have one
+        try:
+            rows = self.store._query(
+                "SELECT account_id FROM account WHERE api_token IS NULL"
+            )
+            for row in rows:
+                self.store._exec(
+                    "UPDATE account SET api_token = ? WHERE account_id = ?",
+                    (secure_token(32), row["account_id"])
+                )
+        except Exception:
+            pass  # Column may not exist yet in very old databases
 
     # -- account lifecycle -------------------------------------------------
 
@@ -330,6 +344,7 @@ class AccountManager:
 
         account_id = "acc-" + secure_token(16)
         password_hash = _pbkdf2_hash(password)
+        api_token = secure_token(32)
         now = time.time()
 
         # Check if email already exists
@@ -342,8 +357,10 @@ class AccountManager:
         with self.store.transaction():
             self.store._exec(
                 "INSERT INTO account(account_id, email, password_hash, "
-                "display_name, created_at, verified) VALUES(?,?,?,?,?,?)",
-                (account_id, email, password_hash, display_name, now, 0),
+                "api_token, display_name, created_at, verified) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (account_id, email, password_hash, api_token,
+                 display_name, now, 0),
             )
             # Create default learner_id from email
             learner_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', email.split('@')[0])
@@ -355,6 +372,7 @@ class AccountManager:
         return {
             "account_id": account_id,
             "email": email,
+            "api_token": api_token,
             "display_name": display_name,
             "learner_id": learner_id,
             "verified": False,
@@ -395,8 +413,8 @@ class AccountManager:
         """Authenticate and create a session."""
         email = email.strip().lower()
         row = self.store._one(
-            "SELECT account_id, password_hash, verified FROM account "
-            "WHERE email = ?",
+            "SELECT account_id, password_hash, api_token, verified "
+            "FROM account WHERE email = ?",
             (email,),
         )
         if not row:
@@ -444,6 +462,7 @@ class AccountManager:
             "session_token": session_token,
             "account_id": account_id,
             "learner_id": learner_id,
+            "api_token": row["api_token"],
             "expires_at": expires_at,
         }
 
@@ -485,6 +504,7 @@ class AccountManager:
             "account_id": row["account_id"],
             "learner_id": row["learner_id"],
             "email": row["email"],
+            "api_token": row["api_token"],
             "display_name": row["display_name"],
             "verified": bool(row["verified"]),
         }

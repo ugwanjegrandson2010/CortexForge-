@@ -174,10 +174,17 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _check_auth(self) -> bool:
-        """Bearer token required for mutating calls (localhost CSRF guard)."""
+        """Per-user API token required for mutating calls (localhost CSRF guard)."""
         supplied = self.headers.get("X-CortexForge-Token", "")
-        from .security import constant_time_compare
-        if not supplied or not constant_time_compare(supplied, self.state.token):
+        if not supplied:
+            self._error(401, "missing or invalid token")
+            return False
+        # Check against per-user tokens in the account table
+        row = self.state.store._one(
+            "SELECT account_id FROM account WHERE api_token = ?",
+            (supplied,)
+        )
+        if row is None:
             self._error(401, "missing or invalid token")
             return False
         return True
@@ -209,8 +216,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static(path[len("/static/"):])
             if path == "/api/health":
                 return self._json({"ok": True, "version": __version__,
-                                   "time": time.time(),
-                                   "token": self.state.token})
+                                   "time": time.time()})
             if path == "/api/manifest":
                 return self._json({
                     "tasks": task_manifest(),

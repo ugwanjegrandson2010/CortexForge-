@@ -201,7 +201,11 @@ async function doLogin() {
     SESSION_TOKEN = data.session_token;
     LEARNER = data.learner_id;
     ACCOUNT = { account_id: data.account_id, email: data.email, display_name: data.display_name };
-    try { sessionStorage.setItem(SESSION_KEY, SESSION_TOKEN); } catch (e) {}
+    TOKEN = data.api_token || '';
+    try {
+      sessionStorage.setItem(SESSION_KEY, SESSION_TOKEN);
+      sessionStorage.setItem(TOKEN_KEY, TOKEN);
+    } catch (e) {}
     showMainApp();
     status('signed in', 'ok');
   } catch (e) { status(e.message, 'err'); }
@@ -309,11 +313,7 @@ async function boot() {
   try {
     MANIFEST = await api('/api/manifest');
     const stored = sessionStorage.getItem(TOKEN_KEY);
-    if (stored) { TOKEN = stored; } else {
-      const health = await api('/api/health');
-      TOKEN = health.token || '';
-      if (TOKEN) { try { sessionStorage.setItem(TOKEN_KEY, TOKEN); } catch (e) {} }
-    }
+    if (stored) { TOKEN = stored; }
     const storedSession = sessionStorage.getItem(SESSION_KEY);
     if (storedSession) {
       SESSION_TOKEN = storedSession;
@@ -324,6 +324,8 @@ async function boot() {
         });
         ACCOUNT = sess;
         LEARNER = sess.learner_id;
+        TOKEN = sess.api_token || '';
+        if (TOKEN) { try { sessionStorage.setItem(TOKEN_KEY, TOKEN); } catch (e2) {} }
         $('learner-tag').textContent = sess.display_name || sess.email;
         // Check if onboarding is complete
         const profile = await api('/api/profile?learner_id=' + encodeURIComponent(LEARNER));
