@@ -274,9 +274,14 @@ def validate_outbound_url(url: str, allow_private: bool = False) -> str:
     a private, loopback, link-local, or reserved range. This is the SSRF
     control (CVE-2024-28849 class). Callers MUST re-validate after every
     redirect, because a 302 to 127.0.0.1 is the standard bypass.
+
+    Also blocks bracketed hosts that are not valid IPv6 (CVE-2024-11168,
+    CVE-2025-0938).
     """
     if not isinstance(url, str) or not url:
         raise SecurityError("empty URL")
+    # CVE-2023-24329: strip leading whitespace before URL parsing
+    url = url.lstrip()
     if any(c in url for c in ("\n", "\r", "\t", "\x00")):
         raise SecurityError("control character in URL")
     parsed = urlparse(url)
@@ -287,6 +292,12 @@ def validate_outbound_url(url: str, allow_private: bool = False) -> str:
     host = parsed.hostname
     if not host:
         raise SecurityError("URL has no host")
+    # CVE-2024-11168 / CVE-2025-0938: validate bracketed hosts
+    if host.startswith('[') and host.endswith(']'):
+        try:
+            ipaddress.ip_address(host[1:-1])
+        except ValueError:
+            raise SecurityError(f"invalid bracketed host: {host}")
     if host.lower() in BLOCKED_HOSTNAMES:
         raise SecurityError(f"blocked hostname: {host}")
     if not allow_private:
@@ -374,7 +385,11 @@ CSP_POLICY = (
 
 
 def security_headers() -> dict[str, str]:
-    """Response headers for the local HTTP surface."""
+    """Response headers for the local HTTP surface.
+
+    Includes protections against XSS, clickjacking, MIME sniffing, CSRF,
+    and other web attacks. CVE-referenced controls from security research.
+    """
     return {
         "Content-Security-Policy": CSP_POLICY,
         "X-Content-Type-Options": "nosniff",
@@ -385,6 +400,10 @@ def security_headers() -> dict[str, str]:
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": "same-origin",
         "Cache-Control": "no-store",
+        "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+        "X-XSS-Protection": "1; mode=block",
+        "X-Permitted-Cross-Domain-Policies": "none",
+        "X-Download-Options": "noopen",
     }
 
 

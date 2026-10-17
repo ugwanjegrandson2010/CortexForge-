@@ -269,16 +269,20 @@ function showMainApp() {
   boot();
 }
 
-/* --------------------------------------------------------------- tabs */
+/* --------------------------------------------------------------- nav */
 
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    tab.classList.add('active');
-    const viewName = 'view-' + tab.dataset.view;
+    item.classList.add('active');
+    const viewName = 'view-' + item.dataset.view;
     const viewEl = $(viewName);
     if (viewEl) viewEl.classList.add('active');
+    // Close sidebar on mobile after selection
+    if (window.innerWidth <= 768) {
+      document.querySelector('.sidebar')?.classList.remove('open');
+    }
   });
 });
 
@@ -352,16 +356,16 @@ async function loadDashboard() {
 }
 
 $('dash-start-session').addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelector('.tab[data-view="study"]').classList.add('active');
+  document.querySelector('.nav-item[data-view="study"]').classList.add('active');
   $('view-study').classList.add('active');
 });
 
 $('dash-add-source').addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelector('.tab[data-view="sources"]').classList.add('active');
+  document.querySelector('.nav-item[data-view="sources"]').classList.add('active');
   $('view-sources').classList.add('active');
 });
 

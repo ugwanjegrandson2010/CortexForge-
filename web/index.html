@@ -83,16 +83,35 @@
       </div>
     </header>
 
-    <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="dashboard" role="tab">Dashboard</button>
-      <button class="tab" data-view="study" role="tab">Study</button>
-      <button class="tab" data-view="sources" role="tab">Sources</button>
-      <button class="tab" data-view="profile" role="tab">Profile</button>
-      <button class="tab" data-view="tutor" role="tab">Tutor</button>
-      <button class="tab" data-view="integrations" role="tab">Integrations</button>
-    </nav>
+    <div class="app-layout">
+      <nav class="sidebar" role="navigation" aria-label="Main navigation">
+        <button class="nav-item active" data-view="dashboard" role="tab">
+          <span class="nav-icon">D</span>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="study" role="tab">
+          <span class="nav-icon">S</span>
+          <span class="nav-label">Study</span>
+        </button>
+        <button class="nav-item" data-view="sources" role="tab">
+          <span class="nav-icon">M</span>
+          <span class="nav-label">Sources</span>
+        </button>
+        <button class="nav-item" data-view="profile" role="tab">
+          <span class="nav-icon">P</span>
+          <span class="nav-label">Profile</span>
+        </button>
+        <button class="nav-item" data-view="tutor" role="tab">
+          <span class="nav-icon">T</span>
+          <span class="nav-label">Tutor</span>
+        </button>
+        <button class="nav-item" data-view="integrations" role="tab">
+          <span class="nav-icon">I</span>
+          <span class="nav-label">Integrations</span>
+        </button>
+      </nav>
 
-    <main>
+      <main class="main-content">
       <!-- DASHBOARD -->
       <section id="view-dashboard" class="view active">
         <div class="dash-grid">
@@ -204,7 +223,8 @@
           <pre id="mcp-out" class="code"></pre>
         </div>
       </section>
-    </main>
+      </main>
+    </div>
   </section>
 </div>
 <script src="/static/lib/three.min.js"></script>

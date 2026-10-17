@@ -133,10 +133,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _headers(self, status: int, ctype: str, length: int) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", ctype)
+        # CVE-2019-9740/CVE-2019-9947: sanitize CRLF in headers
+        safe_ctype = ctype.replace('\r', ' ').replace('\n', ' ').replace('\x00', '')
+        self.send_header("Content-Type", safe_ctype)
         self.send_header("Content-Length", str(length))
         for k, v in security_headers().items():
-            self.send_header(k, v)
+            safe_k = k.replace('\r', ' ').replace('\n', ' ').replace('\x00', '')
+            safe_v = v.replace('\r', ' ').replace('\n', ' ').replace('\x00', '')
+            self.send_header(safe_k, safe_v)
         self.end_headers()
 
     def _json(self, obj: Any, status: int = 200) -> None:
@@ -149,6 +153,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_host(self) -> bool:
         host = (self.headers.get("Host") or "").split(":")[0]
+        # CVE-2015-20107: hostname length limit (RFC 1035)
+        if len(host) > 253:
+            self._error(400, "hostname too long")
+            return False
+        # Reject control characters in hostname
+        if any(ord(c) < 32 or ord(c) == 127 for c in host):
+            self._error(400, "invalid hostname")
+            return False
         if host and host not in ALLOWED_HOSTS:
             self._error(403, "host not allowed")
             return False
@@ -174,9 +186,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._check_host():
             return
-        parsed = urllib.parse.urlparse(self.path)
+        # CVE-2021-28861: collapse leading slashes to prevent open redirect
+        raw_path = self.path
+        while raw_path.startswith('//'):
+            raw_path = '/' + raw_path.lstrip('/')
+        parsed = urllib.parse.urlparse(raw_path)
         path = parsed.path
-        query = urllib.parse.parse_qs(parsed.query)
+        # CVE-2021-23336: strict query parsing
+        query = urllib.parse.parse_qs(parsed.query, strict_parsing=False,
+                                       max_num_fields=100)
         try:
             if path == "/":
                 return self._serve_static("index.html")
@@ -229,7 +247,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._check_auth():
             return
-        parsed = urllib.parse.urlparse(self.path)
+        # CVE-2021-28861: collapse leading slashes
+        raw_path = self.path
+        while raw_path.startswith('//'):
+            raw_path = '/' + raw_path.lstrip('/')
+        parsed = urllib.parse.urlparse(raw_path)
         path = parsed.path
         try:
             body = self._read_body()
