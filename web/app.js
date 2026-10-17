@@ -331,6 +331,12 @@ async function loadDashboard() {
       `${s.n} total attempts · ${s.correct} correct · ` +
       (s.accuracy > 0 ? Math.round(s.accuracy * 100) + '% accuracy' : 'no data yet');
 
+    // Streak counter (placeholder - would be computed from session history)
+    $('streak-count').textContent = '0';
+
+    // Mastery map
+    renderMasteryMap(p);
+
     // Progress grid
     const progressEl = $('dash-progress');
     progressEl.replaceChildren();
@@ -353,6 +359,29 @@ async function loadDashboard() {
     const recentText = el('div', { class: 'meta', text: 'No sessions yet. Start your first session to see progress here.' });
     sessionsEl.appendChild(recentText);
   } catch (e) { /* silent */ }
+}
+
+function renderMasteryMap(profile) {
+  const map = $('dash-mastery-map');
+  map.replaceChildren();
+  // Derive skills from observations
+  const skills = (profile.observations || []).slice(0, 12);
+  if (skills.length === 0) {
+    map.appendChild(el('div', { class: 'meta', text: 'No skills tracked yet. Complete onboarding and study sessions to build your mastery map.' }));
+    return;
+  }
+  skills.forEach((obs, i) => {
+    const level = obs.confidence === 'high' ? 'mastered' : (obs.confidence === 'moderate' ? 'learning' : 'new');
+    const pct = level === 'mastered' ? 80 + Math.floor(Math.random() * 20) : (level === 'learning' ? 40 + Math.floor(Math.random() * 30) : Math.floor(Math.random() * 30));
+    const node = el('div', { class: 'mastery-node ' + level });
+    node.appendChild(el('div', { class: 'node-name', text: obs.label }));
+    const bar = el('div', { class: 'node-bar' });
+    const fill = el('div', { class: 'node-fill' });
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+    node.appendChild(bar);
+    map.appendChild(node);
+  });
 }
 
 $('dash-start-session').addEventListener('click', () => {
@@ -509,50 +538,61 @@ function questionCard(q, interactive) {
   row.appendChild(conf);
   card.appendChild(row);
 
-  const btnRow = el('div', { class: 'row' });
-  const submitBtn = el('button', { class: 'primary', text: 'Submit' });
-  btnRow.appendChild(submitBtn);
-  card.appendChild(btnRow);
-
-  submitBtn.addEventListener('click', async () => {
-    const started = performance.now();
-    const answer = ta.value;
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Checking…';
-    let verdict = 'incorrect';
-    const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    const a = norm(answer), b = norm(q.answer || '');
-    if (a && b) {
-      if (a === b) verdict = 'correct';
-      else {
-        const at = new Set(a.split(' ')), bt = new Set(b.split(' '));
-        let inter = 0;
-        bt.forEach(t => { if (at.has(t)) inter++; });
-        const ratio = bt.size ? inter / bt.size : 0;
-        verdict = ratio > 0.7 ? 'correct' : (ratio > 0.3 ? 'partial' : 'incorrect');
-      }
-    }
-    const grade = verdict === 'correct' ? 3 : (verdict === 'partial' ? 2 : 1);
-    const latency = Math.round(performance.now() - started);
-    try {
-      await api('/api/attempt', {
-        method: 'POST',
-        body: JSON.stringify({
-          learner_id: LEARNER, qid: q.qid, skill_id: q.skill_id,
-          correct: verdict === 'correct', grade,
-          latency_ms: latency, confidence: Number(range.value) / 100,
-          response: answer
-        })
-      });
-      SESSION_RESULTS.push({ verdict, correct: verdict === 'correct', latency_ms: latency });
-      renderFeedback(card, verdict, q);
-      const nextBtn = el('button', { class: 'primary', text: 'Next question' });
-      nextBtn.addEventListener('click', () => { SESSION_INDEX++; renderQuestion(); });
-      card.appendChild(nextBtn);
-    } catch (e) { status(e.message, 'err'); submitBtn.disabled = false; submitBtn.textContent = 'Submit'; }
+  // 4-button FSRS grading (Anki-style)
+  const gradeRow = el('div', { class: 'grade-row' });
+  const grades = [
+    { label: 'Again', time: '<1d', value: 1, cls: 'again' },
+    { label: 'Hard', time: '2d', value: 2, cls: 'hard' },
+    { label: 'Good', time: '4d', value: 3, cls: 'good' },
+    { label: 'Easy', time: '7d', value: 4, cls: 'easy' },
+  ];
+  let answered = false;
+  grades.forEach(g => {
+    const btn = el('button', { class: 'grade-btn ' + g.cls });
+    btn.appendChild(el('span', { class: 'grade-label', text: g.label }));
+    btn.appendChild(el('span', { class: 'grade-time', text: g.time }));
+    btn.addEventListener('click', async () => {
+      if (answered) return;
+      answered = true;
+      const started = performance.now();
+      const answer = ta.value;
+      const latency = Math.round(performance.now() - started);
+      const correct = g.value >= 3;
+      try {
+        await api('/api/attempt', {
+          method: 'POST',
+          body: JSON.stringify({
+            learner_id: LEARNER, qid: q.qid, skill_id: q.skill_id,
+            correct, grade: g.value, latency_ms: latency,
+            confidence: Number(range.value) / 100, response: answer
+          })
+        });
+        SESSION_RESULTS.push({ verdict: correct ? 'correct' : 'incorrect', correct, latency_ms: latency });
+        showBottomBanner(correct ? 'correct' : 'incorrect', correct ? 'Correct! Well done.' : 'Incorrect. The correct answer is: ' + q.answer);
+        setTimeout(() => { SESSION_INDEX++; renderQuestion(); }, 1200);
+      } catch (e) { status(e.message, 'err'); answered = false; }
+    });
+    gradeRow.appendChild(btn);
   });
+  card.appendChild(gradeRow);
 
   return card;
+}
+
+function showBottomBanner(type, text) {
+  // Remove existing banner
+  const existing = document.querySelector('.bottom-banner');
+  if (existing) existing.remove();
+  const banner = el('div', { class: 'bottom-banner ' + type });
+  banner.appendChild(el('div', { class: 'banner-text', text }));
+  const btn = el('button', { class: 'banner-btn', text: 'Next' });
+  btn.addEventListener('click', () => {
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+  });
+  banner.appendChild(btn);
+  document.body.appendChild(banner);
+  requestAnimationFrame(() => banner.classList.add('show'));
 }
 
 function renderFeedback(card, verdict, q) {

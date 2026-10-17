@@ -116,16 +116,29 @@
       <section id="view-dashboard" class="view active">
         <div class="dash-grid">
           <div class="card dash-hero">
-            <h2 id="dash-greeting">Welcome back</h2>
-            <p class="lede" id="dash-summary">Loading your learning summary…</p>
+            <div class="dash-hero-top">
+              <div>
+                <h2 id="dash-greeting">Welcome back</h2>
+                <p class="lede" id="dash-summary">Loading your learning summary…</p>
+              </div>
+              <div class="streak-badge" id="dash-streak">
+                <span class="streak-flame">🔥</span>
+                <span class="streak-count" id="streak-count">0</span>
+                <span class="streak-label">day streak</span>
+              </div>
+            </div>
             <div class="dash-actions">
-              <button id="dash-start-session" class="btn-primary">Start Session</button>
+              <button id="dash-start-session" class="btn-primary btn-large">Continue Learning</button>
               <button id="dash-add-source" class="btn-secondary">Add Source</button>
             </div>
           </div>
           <div class="card">
             <h3>Today's Plan</h3>
             <div id="dash-plan" class="plan-list"></div>
+          </div>
+          <div class="card">
+            <h3>Mastery Map</h3>
+            <div id="dash-mastery-map" class="mastery-map"></div>
           </div>
           <div class="card">
             <h3>Progress</h3>

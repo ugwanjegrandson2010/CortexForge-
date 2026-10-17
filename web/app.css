@@ -648,10 +648,186 @@ button.btn-sm {
   border-color: var(--line-strong);
 }
 
-.dash-actions {
+.dash-hero-top {
   display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.streak-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--warning-subtle);
+  border: 1px solid var(--warning);
+  min-width: 80px;
+}
+
+.streak-flame {
+  font-size: var(--text-xl);
+  line-height: 1;
+}
+
+.streak-count {
+  font-family: var(--font-heading);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--warning);
+  line-height: 1.2;
+}
+
+.streak-label {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.btn-large {
+  padding: var(--space-3) var(--space-8);
+  font-size: var(--text-md);
+  min-height: 52px;
+}
+
+/* ---------- Mastery Map ---------- */
+.mastery-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  min-height: 120px;
+}
+
+.mastery-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  min-width: 80px;
+  transition: all var(--duration-fast) var(--ease-out);
+  cursor: pointer;
+}
+
+.mastery-node:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.mastery-node .node-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+
+.mastery-node .node-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-3);
+  margin-top: var(--space-1);
+  overflow: hidden;
+}
+
+.mastery-node .node-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.mastery-node.mastered .node-fill { background: var(--success); }
+.mastery-node.learning .node-fill { background: var(--accent); }
+.mastery-node.new .node-fill { background: var(--text-muted); }
+
+/* ---------- FSRS Grading Buttons ---------- */
+.grade-row {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.grade-btn {
+  flex: 1;
+  min-width: 80px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.grade-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.grade-btn .grade-label {
+  font-weight: 600;
+}
+
+.grade-btn .grade-time {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.grade-btn.again { border-color: var(--error); color: var(--error); }
+.grade-btn.hard { border-color: var(--warning); color: var(--warning); }
+.grade-btn.good { border-color: var(--success); color: var(--success); }
+.grade-btn.easy { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Bottom Banner Feedback ---------- */
+.bottom-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: var(--space-4) var(--space-6);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  transform: translateY(100%);
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.bottom-banner.show {
+  transform: translateY(0);
+}
+
+.bottom-banner.correct { border-top-color: var(--success); }
+.bottom-banner.partial { border-top-color: var(--warning); }
+.bottom-banner.incorrect { border-top-color: var(--error); }
+
+.bottom-banner .banner-text {
+  flex: 1;
+  font-size: var(--text-sm);
+}
+
+.bottom-banner .banner-btn {
+  padding: var(--space-2) var(--space-4);
+  min-height: 40px;
 }
 
 .plan-list {
