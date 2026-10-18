@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CortexForge — Adaptive Learning System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+  <!--
+    Critical 3D-layer styles, kept inline so the scientific background scene never
+    flashes unstyled before app.css is parsed.
+    Layering contract: fallback gradient + WebGL canvas at z-index:0, all foreground
+    content at z-index:1.
+  -->
+  <style>
+    /* Solid dark base — prevents a white flash before the scene paints */
+    html { background-color: #08090d; }
+
+    /* Body carries the canvas-fallback gradient. It shows through if WebGL /
+       Three.js fails to load; the WebGL canvas paints on top when it works. */
+    body.canvas-fallback {
+      background-color: #08090d;
+      background-image:
+        radial-gradient(circle at 18% 22%, rgba(94, 106, 210, 0.38), transparent 55%),
+        radial-gradient(circle at 82% 68%, rgba(124, 58, 237, 0.30), transparent 52%),
+        radial-gradient(circle at 50% 105%, rgba(14, 165, 233, 0.22), transparent 60%),
+        linear-gradient(160deg, #08090d 0%, #0d0e15 50%, #08090d 100%);
+      background-attachment: fixed;
+    }
+
+    /* Full-viewport WebGL canvas — fixed, z-index:0, non-interactive */
+    .bg-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      display: block;
+      pointer-events: none;
+    }
+
+    /* Foreground content sits at z-index:1, above the 3D scene */
+    .view,
+    .app-layout,
+    .main-content,
+    .sidebar {
+      position: relative;
+      z-index: 1;
+    }
+    .skip-link { z-index: 1; }
+    .app-header { z-index: 20; }        /* sticky header above the scene */
+    .mobile-tab-bar { z-index: 30; }
+    .modal-overlay { z-index: 100; }    /* command palette */
+    .toast-container { z-index: 200; }
+
+    /* Transparent main content so the 3D scene shows through; the ::before gradient
+       overlay keeps text legible over the moving background. */
+    .main-content { background: transparent; }
+    .main-content::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(8, 9, 13, 0.18) 0%, rgba(8, 9, 13, 0.42) 100%);
+    }
+
+    /* Frosted-glass cards: semi-transparent + 12px blur so 3D visuals show through */
+    .card {
+      background: rgba(20, 21, 28, 0.62);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    /* Three.js loading state (spinner pill) shown until the scene reports ready */
+    .three-loader {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(20, 21, 28, 0.72);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: opacity 0.4s ease, visibility 0.4s ease;
+    }
+    .three-loader.is-hidden { opacity: 0; visibility: hidden; }
+    .three-loader-spinner {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      border-top-color: rgba(255, 255, 255, 0.7);
+      animation: three-spin 0.9s linear infinite;
+    }
+    @keyframes three-spin { to { transform: rotate(360deg); } }
+
+    /* Scene-complexity knob for the Three.js layer — app.js reads
+       getComputedStyle(document.documentElement).getPropertyValue('--scene-particle-scale').
+       Mobile gets a simplified scene (fewer particles) for performance. */
+    :root { --scene-particle-scale: 1; }
+    @media (max-width: 768px) {
+      :root { --scene-particle-scale: 0.35; }
+      .card { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .three-loader-spinner { animation: none; }
+    }
+
+    /* Solid fallback where backdrop-filter is unsupported */
+    @supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
+      .card { background: rgba(20, 21, 28, 0.94); }
+    }
+
+    /* No-JS notice */
+    .noscript-banner {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 999;
+      padding: 12px 16px;
+      text-align: center;
+      font-size: 14px;
+      color: #f5f6f8;
+      background: rgba(180, 40, 60, 0.92);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+  </style>
+</head>
+<body data-theme="dark" class="canvas-fallback">
+
+  <!-- ── Three.js scientific-visualization background ─────────── -->
+  <!-- WebGL canvas: FIRST element in body, position:fixed, z-index:0, non-interactive.
+       data-scene is swapped per view by app.js:
+         molecules (auth view — large rotating caffeine/glucose + floating equations)
+         ambient   (dashboard — subtle molecules behind the glass cards)
+         focused   (study / tutor — one hero molecule) -->
+  <canvas id="bg-canvas" class="bg-canvas" data-scene="molecules" aria-hidden="true" data-testid="bg-canvas"></canvas>
+
+  <!-- Loading state shown while the Three.js scene initializes -->
+  <div id="three-loader" class="three-loader" role="status" aria-live="polite" data-testid="three-loader">
+    <div class="three-loader-spinner" aria-hidden="true"></div>
+    <span class="text-xs text-tertiary">Initializing 3D scene…</span>
+  </div>
+
+  <!-- No-JS fallback -->
+  <noscript>
+    <div class="noscript-banner" role="alert" data-testid="noscript-banner">
+      CortexForge needs JavaScript for interactive study sessions, the 3D background, and data sync. Please enable JavaScript and reload.
+    </div>
+  </noscript>
+
+  <!-- ── Skip-to-content ─────────────────────────────────────── -->
+  <a href="#main-content" class="skip-link" data-testid="skip-link">
+    Skip to main content
+  </a>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- AUTH VIEW                                                 -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <div id="auth-view" class="view auth-view" role="region" aria-label="Authentication" data-scene="molecules">
+    <div class="auth-card card">
+      <!-- Brand -->
+      <div class="auth-brand">
+        <div class="auth-logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="40" height="40" fill="none">
+            <path d="M16 2 L28 9 L28 23 L16 30 L4 23 L4 9 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M16 8 L22 12 L22 20 L16 24 L10 20 L10 12 Z" fill="currentColor" opacity="0.6"/>
+            <circle cx="16" cy="16" r="3" fill="currentColor"/>
+          </svg>
+        </div>
+        <h1 class="auth-title text-primary">CortexForge</h1>
+        <p class="auth-subtitle text-secondary">Adaptive learning, engineered for retention</p>
+      </div>
+
+      <!-- Tabs -->
+      <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+        <button class="auth-tab tab-active" role="tab" id="tab-signin" aria-selected="true" aria-controls="panel-signin" data-tab="signin" data-testid="tab-signin">Sign In</button>
+        <button class="auth-tab" role="tab" id="tab-signup" aria-selected="false" aria-controls="panel-signup" data-tab="signup" data-testid="tab-signup">Create Account</button>
+        <button class="auth-tab" role="tab" id="tab-forgot" aria-selected="false" aria-controls="panel-forgot" data-tab="forgot" data-testid="tab-forgot">Forgot Password</button>
+      </div>
+
+      <!-- Sign In Panel -->
+      <div class="auth-panel" id="panel-signin" role="tabpanel" aria-labelledby="tab-signin">
+        <form id="form-signin" class="auth-form" novalidate data-testid="form-signin">
+          <div class="form-group">
+            <label for="signin-email" class="label text-secondary">Email</label>
+            <input type="email" id="signin-email" name="email" class="input" placeholder="you@example.com" autocomplete="email" required data-testid="signin-email">
+          </div>
+          <div class="form-group">
+            <label for="signin-password" class="label text-secondary">Password</label>
+            <input type="password" id="signin-password" name="password" class="input" placeholder="••••••••" autocomplete="current-password" required data-testid="signin-password">
+          </div>
+          <div class="form-row flex items-center justify-between">
+            <label class="flex items-center gap-2 text-sm text-tertiary cursor-pointer">
+              <input type="checkbox" id="signin-remember" class="input-checkbox"> Remember me
+            </label>
+            <a href="#" class="auth-link text-sm" data-tab-link="forgot" data-testid="forgot-link">Forgot password?</a>
+          </div>
+          <button type="submit" class="btn btn-primary w-full" data-testid="btn-signin">Sign In</button>
+        </form>
+      </div>
+
+      <!-- Sign Up Panel -->
+      <div class="auth-panel hidden" id="panel-signup" role="tabpanel" aria-labelledby="tab-signup">
+        <form id="form-signup" class="auth-form" novalidate data-testid="form-signup">
+          <div class="form-group">
+            <label for="signup-name" class="label text-secondary">Full Name</label>
+            <input type="text" id="signup-name" name="name" class="input" placeholder="Jane Learner" autocomplete="name" required data-testid="signup-name">
+          </div>
+          <div class="form-group">
+            <label for="signup-email" class="label text-secondary">Email</label>
+            <input type="email" id="signup-email" name="email" class="input" placeholder="you@example.com" autocomplete="email" required data-testid="signup-email">
+          </div>
+          <div class="form-group">
+            <label for="signup-password" class="label text-secondary">Password</label>
+            <input type="password" id="signup-password" name="password" class="input" placeholder="Min 8 characters" autocomplete="new-password" required data-testid="signup-password">
+            <!-- Password strength meter -->
+            <div class="password-meter" aria-label="Password strength" data-testid="password-meter">
+              <div class="password-meter-bar">
+                <div class="password-meter-fill" id="password-meter-fill"></div>
+              </div>
+              <span class="password-meter-label text-xs text-tertiary" id="password-meter-label">Enter a password</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="signup-confirm" class="label text-secondary">Confirm Password</label>
+            <input type="password" id="signup-confirm" name="confirm" class="input" placeholder="Re-enter password" autocomplete="new-password" required data-testid="signup-confirm">
+          </div>
+          <button type="submit" class="btn btn-primary w-full" data-testid="btn-signup">Create Account</button>
+        </form>
+      </div>
+
+      <!-- Forgot Password Panel -->
+      <div class="auth-panel hidden" id="panel-forgot" role="tabpanel" aria-labelledby="tab-forgot">
+        <form id="form-forgot" class="auth-form" novalidate data-testid="form-forgot">
+          <p class="text-sm text-tertiary mb-4">Enter your email and we'll send a reset link.</p>
+          <div class="form-group">
+            <label for="forgot-email" class="label text-secondary">Email</label>
+            <input type="email" id="forgot-email" name="email" class="input" placeholder="you@example.com" autocomplete="email" required data-testid="forgot-email">
+          </div>
+          <button type="submit" class="btn btn-primary w-full" data-testid="btn-forgot">Send Reset Link</button>
+          <div class="mt-4 text-center">
+            <a href="#" class="auth-link text-sm" data-tab-link="signin" data-testid="back-to-signin">← Back to Sign In</a>
+          </div>
+        </form>
+      </div>
+
+      <!-- Auth footer -->
+      <div class="auth-footer text-xs text-tertiary text-center mt-6">
+        By continuing you agree to the <a href="#" class="auth-link">Terms</a> and <a href="#" class="auth-link">Privacy Policy</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- MAIN APP VIEW                                             -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <div id="app-view" class="view hidden" role="region" aria-label="Main application">
+
+    <!-- Sticky Header -->
+    <header class="app-header sticky" role="banner" data-testid="app-header">
+      <div class="header-left flex items-center gap-3">
+        <button class="btn btn-ghost btn-sm" id="sidebar-toggle" aria-label="Toggle sidebar" data-testid="sidebar-toggle">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <div class="header-brand flex items-center gap-2">
+          <svg viewBox="0 0 32 32" width="24" height="24" fill="none" aria-hidden="true">
+            <path d="M16 2 L28 9 L28 23 L16 30 L4 23 L4 9 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <circle cx="16" cy="16" r="4" fill="currentColor"/>
+          </svg>
+          <span class="header-brand-name text-sm font-semibold">CortexForge</span>
+        </div>
+      </div>
+      <div class="header-center">
+        <button class="btn btn-ghost btn-sm header-cmd" id="command-palette-trigger" aria-label="Open command palette" data-testid="command-palette-trigger">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M11 11 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="text-tertiary">Search…</span>
+          <kbd class="text-xs text-tertiary">⌘K</kbd>
+        </button>
+      </div>
+      <div class="header-right flex items-center gap-3">
+        <!-- Learner tag -->
+        <span class="learner-tag badge" id="learner-tag" data-testid="learner-tag" aria-label="Current learner">Learner</span>
+        <!-- Status indicator -->
+        <span class="status-indicator" id="status-indicator" data-testid="status-indicator" aria-label="System status">
+          <span class="status-dot"></span>
+          <span class="text-xs text-tertiary">Online</span>
+        </span>
+        <!-- Theme toggle -->
+        <button class="btn btn-ghost btn-icon" id="theme-toggle" aria-label="Toggle dark/light theme" data-testid="theme-toggle">
+          <svg class="icon-sun" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <svg class="icon-moon hidden" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/></svg>
+        </button>
+        <!-- Logout -->
+        <button class="btn btn-ghost btn-icon" id="logout-btn" aria-label="Sign out" data-testid="logout-btn">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 2h8v12H6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/><path d="M1 8h8M7 5l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <!-- Avatar -->
+        <div class="avatar avatar-sm" id="header-avatar" data-testid="header-avatar" aria-label="User avatar">L</div>
+      </div>
+    </header>
+
+    <!-- App Layout: Sidebar + Main -->
+    <div class="app-layout flex">
+
+      <!-- Sidebar Navigation -->
+      <aside class="sidebar" id="sidebar" role="navigation" aria-label="Primary navigation" data-testid="sidebar">
+        <nav class="sidebar-nav">
+          <a href="#" class="nav-item" data-view="dashboard" data-testid="nav-dashboard">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            <span>Dashboard</span>
+          </a>
+          <a href="#" class="nav-item" data-view="study" data-testid="nav-study">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <span>Study</span>
+          </a>
+          <a href="#" class="nav-item" data-view="sources" data-testid="nav-sources">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2 2h12v12H2z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+            <span>Sources</span>
+          </a>
+          <a href="#" class="nav-item" data-view="profile" data-testid="nav-profile">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+            <span>Profile</span>
+          </a>
+          <a href="#" class="nav-item" data-view="tutor" data-testid="nav-tutor">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2 3h12v8H5l-3 3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/></svg>
+            <span>Tutor</span>
+          </a>
+          <a href="#" class="nav-item" data-view="integrations" data-testid="nav-integrations">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 3l4 5-4 5M10 3l4 5-4 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>Integrations</span>
+          </a>
+          <a href="#" class="nav-item" data-view="settings" data-testid="nav-settings">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M13 3l-1.4 1.4M4.4 11.6L3 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <span>Settings</span>
+          </a>
+        </nav>
+        <div class="sidebar-footer text-xs text-tertiary">
+          <span id="sidebar-version">v1.0.0</span>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main id="main-content" class="main-content" role="main" tabindex="-1">
+
+        <!-- ── VIEW: DASHBOARD ──────────────────────────────── -->
+        <section id="view-dashboard" class="view-section" role="region" aria-label="Dashboard" data-scene="ambient" data-testid="view-dashboard">
+          <!-- Hero Card -->
+          <div class="card hero-card" data-testid="hero-card">
+            <div class="hero-greeting">
+              <h2 class="text-xl font-semibold" id="hero-greeting" data-testid="hero-greeting">Welcome back</h2>
+              <p class="text-sm text-secondary mt-1" id="hero-subtitle">Ready to continue your learning streak?</p>
+            </div>
+            <div class="hero-actions flex items-center gap-3 mt-4">
+              <button class="btn btn-primary" id="continue-learning-btn" data-testid="continue-learning-btn">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M4 2l10 6-10 6z"/></svg>
+                Continue Learning
+              </button>
+              <!-- Streak badge -->
+              <span class="badge badge-accent streak-badge" id="streak-badge" data-testid="streak-badge" aria-label="Learning streak">
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 1C5 4 3 6 3 9a5 5 0 0 0 10 0c0-3-2-5-5-8z"/></svg>
+                <span id="streak-count">0</span> day streak
+              </span>
+            </div>
+          </div>
+
+          <!-- Progress Rings -->
+          <div class="grid grid-3 gap-4 mt-4">
+            <div class="card progress-card" data-testid="progress-daily">
+              <h3 class="text-sm font-medium text-secondary">Daily Goal</h3>
+              <div class="progress-ring mt-3" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Daily progress">
+                <svg viewBox="0 0 80 80" class="progress-ring-svg">
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-bg"/>
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-fill" id="ring-daily" stroke-dasharray="213.6" stroke-dashoffset="213.6" transform="rotate(-90 40 40)"/>
+                </svg>
+                <span class="progress-ring-value text-lg font-semibold" id="ring-daily-value">0%</span>
+              </div>
+              <p class="text-xs text-tertiary mt-2"><span id="ring-daily-current">0</span> / <span id="ring-daily-target">10</span> questions</p>
+            </div>
+            <div class="card progress-card" data-testid="progress-weekly">
+              <h3 class="text-sm font-medium text-secondary">Weekly Goal</h3>
+              <div class="progress-ring mt-3" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Weekly progress">
+                <svg viewBox="0 0 80 80" class="progress-ring-svg">
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-bg"/>
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-fill" id="ring-weekly" stroke-dasharray="213.6" stroke-dashoffset="213.6" transform="rotate(-90 40 40)"/>
+                </svg>
+                <span class="progress-ring-value text-lg font-semibold" id="ring-weekly-value">0%</span>
+              </div>
+              <p class="text-xs text-tertiary mt-2"><span id="ring-weekly-current">0</span> / <span id="ring-weekly-target">50</span> questions</p>
+            </div>
+            <div class="card progress-card" data-testid="progress-mastered">
+              <h3 class="text-sm font-medium text-secondary">Mastered</h3>
+              <div class="progress-ring mt-3" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Mastery progress">
+                <svg viewBox="0 0 80 80" class="progress-ring-svg">
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-bg"/>
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="6" class="progress-ring-fill" id="ring-mastered" stroke-dasharray="213.6" stroke-dashoffset="213.6" transform="rotate(-90 40 40)"/>
+                </svg>
+                <span class="progress-ring-value text-lg font-semibold" id="ring-mastered-value">0%</span>
+              </div>
+              <p class="text-xs text-tertiary mt-2"><span id="ring-mastered-count">0</span> topics mastered</p>
+            </div>
+          </div>
+
+          <!-- Mastery Map + Calibration Chart -->
+          <div class="grid grid-2 gap-4 mt-4">
+            <div class="card" data-testid="mastery-map-card">
+              <h3 class="text-sm font-medium text-secondary mb-3">Mastery Map</h3>
+              <div class="mastery-map" id="mastery-map" data-testid="mastery-map" role="img" aria-label="Topic mastery node graph">
+                <svg id="mastery-map-svg" viewBox="0 0 400 300" width="100%" height="300" aria-hidden="true">
+                  <!-- Nodes and edges injected by JS -->
+                </svg>
+              </div>
+            </div>
+            <div class="card" data-testid="calibration-chart-card">
+              <h3 class="text-sm font-medium text-secondary mb-3">Calibration</h3>
+              <div class="calibration-chart" id="calibration-chart" data-testid="calibration-chart" role="img" aria-label="Confidence calibration chart">
+                <svg id="calibration-svg" viewBox="0 0 400 300" width="100%" height="300" aria-hidden="true">
+                  <!-- Chart injected by JS -->
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Session Analytics Grid -->
+          <div class="grid grid-4 gap-4 mt-4">
+            <div class="card stat-card" data-testid="stat-accuracy">
+              <p class="text-xs text-tertiary">Accuracy</p>
+              <p class="stat-value text-2xl font-semibold mt-1" id="stat-accuracy-value">—</p>
+              <p class="text-xs text-tertiary mt-1">Last 7 days</p>
+            </div>
+            <div class="card stat-card" data-testid="stat-sessions">
+              <p class="text-xs text-tertiary">Sessions</p>
+              <p class="stat-value text-2xl font-semibold mt-1" id="stat-sessions-value">—</p>
+              <p class="text-xs text-tertiary mt-1">This week</p>
+            </div>
+            <div class="card stat-card" data-testid="stat-time">
+              <p class="text-xs text-tertiary">Study Time</p>
+              <p class="stat-value text-2xl font-semibold mt-1" id="stat-time-value">—</p>
+              <p class="text-xs text-tertiary mt-1">Total hours</p>
+            </div>
+            <div class="card stat-card" data-testid="stat-retention">
+              <p class="text-xs text-tertiary">Retention</p>
+              <p class="stat-value text-2xl font-semibold mt-1" id="stat-retention-value">—</p>
+              <p class="text-xs text-tertiary mt-1">Spaced repetition</p>
+            </div>
+          </div>
+
+          <!-- Recent Sessions -->
+          <div class="card mt-4" data-testid="recent-sessions-card">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-secondary">Recent Sessions</h3>
+              <a href="#" class="text-xs text-tertiary hover:text-primary">View all →</a>
+            </div>
+            <div class="recent-sessions" id="recent-sessions" data-testid="recent-sessions" role="list" aria-label="Recent study sessions">
+              <!-- Session items injected by JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ── VIEW: STUDY ─────────────────────────────────── -->
+        <section id="view-study" class="view-section hidden" role="region" aria-label="Study session" data-scene="focused" data-testid="view-study">
+          <!-- Session Meta -->
+          <div class="card session-meta" data-testid="session-meta">
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-lg font-semibold">Study Session</h2>
+                <p class="text-sm text-tertiary mt-1" id="session-meta-text">No active session</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="badge" id="session-badge">Idle</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage Indicators -->
+          <div class="stage-indicators flex items-center gap-2 mt-4" id="stage-indicators" data-testid="stage-indicators" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="6" aria-label="Session progress stages">
+            <div class="stage-dot" data-stage="1" aria-label="Stage 1"></div>
+            <div class="stage-dot" data-stage="2" aria-label="Stage 2"></div>
+            <div class="stage-dot" data-stage="3" aria-label="Stage 3"></div>
+            <div class="stage-dot" data-stage="4" aria-label="Stage 4"></div>
+            <div class="stage-dot" data-stage="5" aria-label="Stage 5"></div>
+            <div class="stage-dot" data-stage="6" aria-label="Stage 6"></div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-center gap-3 mt-4">
+            <button class="btn btn-primary" id="load-session-btn" data-testid="load-session-btn">Load Session</button>
+            <button class="btn btn-secondary" id="generate-more-btn" data-testid="generate-more-btn">Generate More</button>
+          </div>
+
+          <!-- Question Area -->
+          <div class="card mt-4" id="question-area" data-testid="question-area" role="region" aria-label="Current question">
+            <div class="question-placeholder text-tertiary text-sm py-8 text-center" id="question-placeholder">
+              Load a session to begin studying
+            </div>
+            <div class="question-content hidden" id="question-content">
+              <div class="flex items-center justify-between mb-3">
+                <span class="badge badge-sm" id="question-topic">Topic</span>
+                <span class="text-xs text-tertiary" id="question-counter">1 / 10</span>
+              </div>
+              <p class="text-base" id="question-text">Question text</p>
+              <div class="question-options mt-4 flex flex-col gap-2" id="question-options" role="radiogroup" aria-label="Answer options">
+                <!-- Options injected by JS -->
+              </div>
+              <div class="flex items-center gap-3 mt-4">
+                <button class="btn btn-primary btn-sm" id="submit-answer-btn">Submit</button>
+                <button class="btn btn-ghost btn-sm" id="skip-question-btn">Skip</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary Area -->
+          <div class="card mt-4 hidden" id="summary-area" data-testid="summary-area" role="region" aria-label="Session summary">
+            <h3 class="text-sm font-medium text-secondary mb-3">Session Summary</h3>
+            <div id="summary-content" class="text-sm">
+              <!-- Summary injected by JS -->
+            </div>
+            <button class="btn btn-primary btn-sm mt-4" id="summary-close-btn">Close Summary</button>
+          </div>
+        </section>
+
+        <!-- ── VIEW: SOURCES ───────────────────────────────── -->
+        <section id="view-sources" class="view-section hidden" role="region" aria-label="Learning sources" data-scene="ambient" data-testid="view-sources">
+          <h2 class="text-lg font-semibold mb-4">Sources</h2>
+
+          <!-- Add Source Form -->
+          <div class="card" data-testid="add-source-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Add Source</h3>
+            <form id="add-source-form" class="flex flex-col gap-3" data-testid="add-source-form">
+              <div class="form-group">
+                <label for="source-title" class="label text-secondary">Title</label>
+                <input type="text" id="source-title" class="input" placeholder="e.g., Chapter 5 — Neural Networks" required data-testid="source-title">
+              </div>
+              <div class="form-group">
+                <label for="source-type" class="label text-secondary">Type</label>
+                <select id="source-type" class="input" data-testid="source-type">
+                  <option value="book">Book</option>
+                  <option value="article">Article</option>
+                  <option value="video">Video</option>
+                  <option value="paper">Paper</option>
+                  <option value="course">Course</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="source-url" class="label text-secondary">URL (optional)</label>
+                <input type="url" id="source-url" class="input" placeholder="https://..." data-testid="source-url">
+              </div>
+              <button type="submit" class="btn btn-primary">Add Source</button>
+            </form>
+          </div>
+
+          <!-- Generate Questions Form -->
+          <div class="card mt-4" data-testid="generate-questions-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Generate Questions</h3>
+            <form id="generate-questions-form" class="flex flex-col gap-3" data-testid="generate-questions-form">
+              <div class="form-group">
+                <label for="gen-source" class="label text-secondary">Source</label>
+                <select id="gen-source" class="input" data-testid="gen-source">
+                  <option value="">Select a source…</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="gen-count" class="label text-secondary">Number of Questions</label>
+                <input type="number" id="gen-count" class="input" value="5" min="1" max="50" data-testid="gen-count">
+              </div>
+              <!-- Style Picker Chips -->
+              <div class="form-group">
+                <label class="label text-secondary">Style</label>
+                <div class="style-chips flex flex-wrap gap-2" id="style-chips" data-testid="style-chips" role="radiogroup" aria-label="Question style">
+                  <button type="button" class="chip chip-active" data-style="socratic" role="radio" aria-checked="true">Socratic</button>
+                  <button type="button" class="chip" data-style="factual" role="radio" aria-checked="false">Factual</button>
+                  <button type="button" class="chip" data-style="application" role="radio" aria-checked="false">Application</button>
+                  <button type="button" class="chip" data-style="analytical" role="radio" aria-checked="false">Analytical</button>
+                  <button type="button" class="chip" data-style="creative" role="radio" aria-checked="false">Creative</button>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary">Generate Questions</button>
+            </form>
+          </div>
+
+          <!-- Source List -->
+          <div class="card mt-4" data-testid="source-list-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Your Sources</h3>
+            <div id="source-list" class="source-list flex flex-col gap-2" data-testid="source-list" role="list" aria-label="Added sources">
+              <!-- Sources injected by JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ── VIEW: PROFILE ────────────────────────────────── -->
+        <section id="view-profile" class="view-section hidden" role="region" aria-label="Learner profile" data-scene="ambient" data-testid="view-profile">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Profile</h2>
+            <button class="btn btn-secondary" id="load-profile-btn" data-testid="load-profile-btn">Load Profile</button>
+          </div>
+
+          <div class="card" data-testid="profile-card">
+            <div id="profile-placeholder" class="text-tertiary text-sm py-8 text-center">
+              Click "Load Profile" to fetch learner data
+            </div>
+            <div id="profile-content" class="hidden">
+              <div class="flex items-center gap-4 mb-4">
+                <div class="avatar avatar-lg" id="profile-avatar">L</div>
+                <div>
+                  <p class="font-semibold" id="profile-name">—</p>
+                  <p class="text-sm text-tertiary" id="profile-email">—</p>
+                  <p class="text-xs text-tertiary mt-1" id="profile-joined">—</p>
+                </div>
+              </div>
+
+              <!-- Observations Area -->
+              <div class="mt-4">
+                <h3 class="text-sm font-medium text-secondary mb-3">Observations</h3>
+                <div id="observations-area" class="observations-area flex flex-col gap-2" data-testid="observations-area" role="list" aria-label="Learner observations">
+                  <!-- Observations injected by JS -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── VIEW: TUTOR ─────────────────────────────────── -->
+        <section id="view-tutor" class="view-section hidden" role="region" aria-label="AI Tutor" data-scene="focused" data-testid="view-tutor">
+          <h2 class="text-lg font-semibold mb-4">Tutor</h2>
+
+          <div class="card" data-testid="tutor-config-card">
+            <div class="flex flex-col gap-3">
+              <div class="form-group">
+                <label for="tutor-topic" class="label text-secondary">Topic</label>
+                <input type="text" id="tutor-topic" class="input" placeholder="e.g., Explain gradient descent" data-testid="tutor-topic">
+              </div>
+              <div class="form-group">
+                <label for="tutor-mode" class="label text-secondary">Mode</label>
+                <select id="tutor-mode" class="input" data-testid="tutor-mode">
+                  <option value="explain">Explain</option>
+                  <option value="quiz">Quiz Me</option>
+                  <option value="guide">Step-by-Step Guide</option>
+                  <option value="discuss">Open Discussion</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="btn btn-primary" id="tutor-begin-btn" data-testid="tutor-begin-btn">Begin</button>
+                <button class="btn btn-secondary" id="tutor-hint-btn" data-testid="tutor-hint-btn">Hint</button>
+                <button class="btn btn-ghost" id="tutor-question-btn" data-testid="tutor-question-btn">Ask Question</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat Area -->
+          <div class="card mt-4" data-testid="tutor-chat-card">
+            <div class="tutor-chat" id="tutor-chat" data-testid="tutor-chat" role="log" aria-label="Tutor conversation" aria-live="polite">
+              <div class="text-tertiary text-sm py-8 text-center" id="tutor-placeholder">Start a session to chat with your tutor</div>
+              <!-- Messages injected by JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ── VIEW: INTEGRATIONS ───────────────────────────── -->
+        <section id="view-integrations" class="view-section hidden" role="region" aria-label="Integrations" data-scene="ambient" data-testid="view-integrations">
+          <h2 class="text-lg font-semibold mb-4">Integrations</h2>
+
+          <div class="card" data-testid="mcp-plan-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">MCP Plan</h3>
+            <p class="text-sm text-tertiary mb-4">Generate an <code class="text-xs bg-tertiary px-1 rounded">mcp.json</code> configuration to connect CortexForge to your MCP-compatible tools.</p>
+
+            <div class="form-group">
+              <label for="mcp-endpoint" class="label text-secondary">Server Endpoint</label>
+              <input type="url" id="mcp-endpoint" class="input" placeholder="https://your-mcp-server.example.com" data-testid="mcp-endpoint">
+            </div>
+            <div class="form-group mt-3">
+              <label for="mcp-tools" class="label text-secondary">Enabled Tools</label>
+              <div class="flex flex-wrap gap-2 mt-2" id="mcp-tools" data-testid="mcp-tools">
+                <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" class="input-checkbox" value="search" checked> Search</label>
+                <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" class="input-checkbox" value="create" checked> Create</label>
+                <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" class="input-checkbox" value="update"> Update</label>
+                <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" class="input-checkbox" value="delete"> Delete</label>
+              </div>
+            </div>
+
+            <button class="btn btn-primary mt-4" id="write-mcp-btn" data-testid="write-mcp-btn">Write mcp.json</button>
+          </div>
+
+          <!-- MCP Output -->
+          <div class="card mt-4 hidden" id="mcp-output-card" data-testid="mcp-output-card">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-secondary">Output</h3>
+              <button class="btn btn-ghost btn-sm" id="copy-mcp-btn">Copy</button>
+            </div>
+            <pre class="text-xs bg-tertiary p-4 rounded overflow-auto max-h-96" id="mcp-output" data-testid="mcp-output"><code>// mcp.json output appears here</code></pre>
+          </div>
+        </section>
+
+        <!-- ── VIEW: SETTINGS ───────────────────────────────── -->
+        <section id="view-settings" class="view-section hidden" role="region" aria-label="Settings" data-scene="ambient" data-testid="view-settings">
+          <h2 class="text-lg font-semibold mb-4">Settings</h2>
+
+          <!-- Session Preferences -->
+          <div class="card" data-testid="settings-session-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Session Preferences</h3>
+            <div class="grid grid-3 gap-4">
+              <div class="form-group">
+                <label for="pref-length" class="label text-secondary">Session Length</label>
+                <select id="pref-length" class="input" data-testid="pref-length">
+                  <option value="5">5 minutes</option>
+                  <option value="10" selected>10 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="20">20 minutes</option>
+                  <option value="30">30 minutes</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="pref-days" class="label text-secondary">Days per Week</label>
+                <select id="pref-days" class="input" data-testid="pref-days">
+                  <option value="1">1 day</option>
+                  <option value="2">2 days</option>
+                  <option value="3">3 days</option>
+                  <option value="4" selected>4 days</option>
+                  <option value="5">5 days</option>
+                  <option value="6">6 days</option>
+                  <option value="7">7 days</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="pref-rate" class="label text-secondary">Target Success Rate</label>
+                <select id="pref-rate" class="input" data-testid="pref-rate">
+                  <option value="60">60%</option>
+                  <option value="70" selected>70%</option>
+                  <option value="80">80%</option>
+                  <option value="90">90%</option>
+                  <option value="95">95%</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Difficulty Setting -->
+          <div class="card mt-4" data-testid="settings-difficulty-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Difficulty</h3>
+            <div class="flex items-center gap-4">
+              <input type="range" id="difficulty-slider" class="input-range flex-1" min="1" max="5" value="3" step="1" data-testid="difficulty-slider" aria-label="Difficulty level">
+              <span class="badge" id="difficulty-label">Adaptive</span>
+            </div>
+            <div class="flex justify-between text-xs text-tertiary mt-2">
+              <span>Beginner</span>
+              <span>Easy</span>
+              <span>Adaptive</span>
+              <span>Hard</span>
+              <span>Expert</span>
+            </div>
+          </div>
+
+          <!-- Data Management -->
+          <div class="card mt-4" data-testid="settings-data-card">
+            <h3 class="text-sm font-medium text-secondary mb-3">Data Management</h3>
+            <div class="flex items-center gap-3">
+              <button class="btn btn-secondary" id="export-data-btn" data-testid="export-data-btn">Export Data</button>
+              <button class="btn btn-secondary" id="import-data-btn" data-testid="import-data-btn">Import Data</button>
+              <button class="btn btn-danger" id="erase-data-btn" data-testid="erase-data-btn">Erase All Data</button>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Tab Bar -->
+    <nav class="mobile-tab-bar" role="navigation" aria-label="Mobile navigation" data-testid="mobile-tab-bar">
+      <a href="#" class="mobile-tab" data-view="dashboard" data-testid="mobile-tab-dashboard">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+        <span class="text-xs">Home</span>
+      </a>
+      <a href="#" class="mobile-tab" data-view="study" data-testid="mobile-tab-study">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span class="text-xs">Study</span>
+      </a>
+      <a href="#" class="mobile-tab" data-view="sources" data-testid="mobile-tab-sources">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M2 2h12v12H2z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+        <span class="text-xs">Sources</span>
+      </a>
+      <a href="#" class="mobile-tab" data-view="profile" data-testid="mobile-tab-profile">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+        <span class="text-xs">Profile</span>
+      </a>
+      <a href="#" class="mobile-tab" data-view="tutor" data-testid="mobile-tab-tutor">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M2 3h12v8H5l-3 3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/></svg>
+        <span class="text-xs">Tutor</span>
+      </a>
+    </nav>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- COMMAND PALETTE OVERLAY                                  -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <div id="command-palette" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Command palette" data-testid="command-palette">
+    <div class="modal command-palette-modal" role="document">
+      <div class="command-palette-header">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M11 11 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input type="text" id="command-input" class="input command-input" placeholder="Type a command or search…" aria-label="Command search" data-testid="command-input" autocomplete="off">
+        <kbd class="text-xs text-tertiary">ESC</kbd>
+      </div>
+      <div class="command-palette-results" id="command-results" data-testid="command-results" role="listbox" aria-label="Command results">
+        <!-- Results injected by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- HIDDEN FILE INPUT FOR DATA IMPORT                        -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <input type="file" id="import-file" accept=".json,application/json" class="hidden" aria-label="Import data file" data-testid="import-file">
+
+  <!-- Toast container for notifications -->
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" data-testid="toast-container"></div>
+
+  <!-- ── Libraries (CDN) + app scripts ───────────────────────── -->
+  <!-- Three.js loads locally and renders the scientific background scene.
+       GSAP drives UI animation — staggered card entrances, scroll reveals and view
+       transitions, transform + opacity only for 60fps, with the custom easing
+       cubic-bezier(0.16, 1, 0.3, 1). Lenis adds weighted, physical smooth scroll. -->
+  <script src="three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://unpkg.com/lenis@1.1.14/dist/lenis.min.js"></script>
+  <script src="tasks.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

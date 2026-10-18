@@ -59,7 +59,7 @@ from .mcp import (CATALOGUE, build_mcp_config, core_servers, onboarding_plan,
 from .neuroprotection import NeuroProtectionSystem, Trial
 from .onboarding import Onboarding, PROBES, PROBES_BY_ID
 from .profile import build_profile, grade_feedback, session_summary
-from .questiongen import ALL_STYLES, generate_from_source, interleave
+from .questiongen import ALL_STYLES, Question, generate_from_source, interleave
 from .scheduler import Card, build_queue, retention_forecast
 from .security import (MAX_DOCUMENT_BYTES, SecurityError, escape_html,
                        load_json_only, safe_join, sanitise_text,
@@ -668,14 +668,15 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(q_data, dict):
             question = Question(
                 qid=str(q_data.get("qid") or ""),
-                text=str(q_data.get("text") or ""),
-                answer=str(q_data.get("answer") or ""),
-                skill_id=str(q_data.get("skill_id") or ""),
                 style=str(q_data.get("style") or ""),
-                meta=q_data.get("meta"),
+                prompt=str(q_data.get("prompt") or ""),
+                answer=str(q_data.get("answer") or ""),
+                source_span=str(q_data.get("source_span") or ""),
+                skill_id=str(q_data.get("skill_id") or ""),
+                meta=q_data.get("meta") or {},
             )
         session = tutor.begin_session(lid, topic, mode, question)
-        self._json({"learner_id": lid, "state": session.current().value})
+        self._json({"learner_id": lid, "state": session.state.value})
 
     def _tutor_respond(self, body: dict) -> None:
         lid = self._learner_id(body)

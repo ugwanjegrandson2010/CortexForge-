@@ -14,7 +14,7 @@ It uses graduated hints, Socratic questioning, and metacognitive prompts.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum, IntEnum
 from typing import Optional, Protocol
 
@@ -99,6 +99,9 @@ class TutorResponse:
     affect_detected: str | None
     leak_report: LeakReport
     metadata: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass

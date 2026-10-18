@@ -1,0 +1,227 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+            arch: x86_64
+          - os: macos-latest
+            target: macos-aarch64
+            arch: aarch64
+          - os: macos-13
+            target: macos-x86_64
+            arch: x86_64
+          - os: windows-latest
+            target: windows-x86_64
+            arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller build
+          pip install -e ".[dev]"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m build --outdir dist/
+
+      - name: Build standalone executable (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          pyinstaller \
+            --onefile \
+            --name cortexforge \
+            --clean \
+            --noconfirm \
+            --add-data "web:web" \
+            src/cortexforge/server.py
+
+      - name: Build standalone executable (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller `
+            --onefile `
+            --name cortexforge `
+            --clean `
+            --noconfirm `
+            --add-data "web;web" `
+            src/cortexforge/server.py
+
+      # --- Linux packaging (deb/rpm) ---
+      - name: Install packaging tools (Linux)
+        if: matrix.target == 'linux-x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          gem install fpm
+
+      - name: Build .deb (Linux)
+        if: matrix.target == 'linux-x86_64'
+        run: |
+          mkdir -p dist/deb
+          fpm -s dir -t deb \
+            -n cortexforge \
+            -v "${GITHUB_REF#refs/tags/v}" \
+            --description "CortexForge - Adaptive learning system" \
+            --prefix /usr \
+            --depends python3 \
+            dist/cortexforge=/usr/bin/cortexforge \
+            web=/usr/share/cortexforge/web \
+            LICENSE=/usr/share/doc/cortexforge/LICENSE \
+            README.md=/usr/share/doc/cortexforge/README.md \
+            -p dist/deb/
+
+      - name: Build .rpm (Linux)
+        if: matrix.target == 'linux-x86_64'
+        run: |
+          mkdir -p dist/rpm
+          fpm -s dir -t rpm \
+            -n cortexforge \
+            -v "${GITHUB_REF#refs/tags/v}" \
+            --description "CortexForge - Adaptive learning system" \
+            --prefix /usr \
+            --depends python3 \
+            dist/cortexforge=/usr/bin/cortexforge \
+            web=/usr/share/cortexforge/web \
+            LICENSE=/usr/share/doc/cortexforge/LICENSE \
+            README.md=/usr/share/doc/cortexforge/README.md \
+            -p dist/rpm/
+
+      # --- macOS packaging ---
+      - name: Create .app bundle (macOS)
+        if: startsWith(matrix.target, 'macos')
+        run: |
+          pyinstaller \
+            --windowed \
+            --name CortexForge \
+            --clean \
+            --noconfirm \
+            --add-data "web:web" \
+            src/cortexforge/server.py
+
+      - name: Build .dmg (macOS)
+        if: startsWith(matrix.target, 'macos')
+        run: |
+          brew install create-dmg
+          mkdir -p dist/dmg
+          create-dmg \
+            --volname "CortexForge" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 425 190 \
+            "dist/dmg/CortexForge-${{ matrix.arch }}.dmg" \
+            "dist/CortexForge.app"
+
+      - name: Build .pkg (macOS)
+        if: startsWith(matrix.target, 'macos')
+        run: |
+          mkdir -p dist/pkg
+          pkgbuild \
+            --root dist \
+            --identifier com.cortexforge.app \
+            --version "${GITHUB_REF#refs/tags/v}" \
+            --install-location /Applications \
+            "dist/pkg/CortexForge-${{ matrix.arch }}.pkg"
+
+      # --- Upload artifacts ---
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*
+            !dist/**/*.pyc
+            !dist/**/__pycache__
+            !dist/**/base_library.zip
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Display artifacts
+        run: ls -la artifacts/
+
+      - name: Generate release notes
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          cat > release-notes.md << EOF
+          ## CortexForge v${VERSION}
+
+          ### Installation
+
+          **Linux (Debian/Ubuntu):**
+          \`\`\`bash
+          sudo dpkg -i cortexforge_${VERSION}_amd64.deb
+          \`\`\`
+
+          **Linux (RHEL/Fedora):**
+          \`\`\`bash
+          sudo rpm -i cortexforge_${VERSION}-1.x86_64.rpm
+          \`\`\`
+
+          **macOS:**
+          Mount the .dmg and drag CortexForge to Applications, or:
+          \`\`\`bash
+          installer -pkg CortexForge-${VERSION}.pkg -target /
+          \`\`\`
+
+          **Windows:**
+          Download and run \`cortexforge.exe\` directly.
+
+          ### What's Changed
+          See the [full changelog](https://github.com/${{ github.repository }}/commits/v${VERSION}) for details.
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CortexForge ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
