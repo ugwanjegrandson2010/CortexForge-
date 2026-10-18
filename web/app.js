@@ -449,6 +449,16 @@ function initTheme() {
       if (BG) BG.setTheme(next);
     });
   }
+  const obToggle = $('onboarding-theme-toggle');
+  if (obToggle) {
+    obToggle.addEventListener('click', function () {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      localSet(STORAGE.THEME, next);
+      if (BG) BG.setTheme(next);
+    });
+  }
 }
 
 /* ==========================================================================
@@ -2570,7 +2580,58 @@ async function renderNextProbe() {
     });
     inputWrap.appendChild(select);
     getAnswer = function () { return select.value; };
-  } else if (probe.kind === 'interview' || probe.kind === 'source') {
+  } else if (probe.kind === 'source') {
+    // Source probe: text paste, file upload, and directory picker
+    const ta = el('textarea', { attrs: { rows: '2', placeholder: 'Or paste text here…' } });
+    inputWrap.appendChild(ta);
+
+    // File picker
+    const fileRow = el('div', { class: 'row' });
+    const fileInput = el('input', { attrs: { type: 'file', multiple: '', id: 'source-file-input' } });
+    fileInput.style.display = 'none';
+    const fileBtn = el('button', { class: 'btn-ghost', text: 'Upload files', attrs: { type: 'button' } });
+    fileBtn.addEventListener('click', () => fileInput.click());
+    const fileList = el('span', { class: 'text-secondary', text: '' });
+    fileBtn.addEventListener('click', () => { fileInput.click(); });
+    fileInput.addEventListener('change', () => {
+      const files = Array.from(fileInput.files || []);
+      if (files.length) {
+        fileList.textContent = files.map(f => f.name).join(', ');
+      }
+    });
+    fileRow.appendChild(fileBtn);
+    fileRow.appendChild(fileList);
+    inputWrap.appendChild(fileRow);
+
+    // Directory picker (webkitdirectory)
+    const dirRow = el('div', { class: 'row', attrs: { style: 'margin-top:8px' } });
+    const dirInput = el('input', { attrs: { type: 'file', webkitdirectory: '', id: 'source-dir-input' } });
+    dirInput.style.display = 'none';
+    const dirBtn = el('button', { class: 'btn-ghost', text: 'Choose directory', attrs: { type: 'button' } });
+    const dirList = el('span', { class: 'text-secondary', text: '' });
+    dirBtn.addEventListener('click', () => dirInput.click());
+    dirInput.addEventListener('change', () => {
+      const files = Array.from(dirInput.files || []);
+      if (files.length) {
+        dirList.textContent = files.length + ' files from ' + (files[0].webkitRelativePath.split('/')[0] || 'directory');
+      }
+    });
+    dirRow.appendChild(dirBtn);
+    dirRow.appendChild(dirList);
+    inputWrap.appendChild(dirRow);
+
+    getAnswer = function () {
+      const text = ta.value.trim();
+      const files = Array.from(fileInput.files || []).map(f => f.name);
+      const dirFiles = Array.from(dirInput.files || []).map(f => f.name);
+      if (!text && !files.length && !dirFiles.length) return null;
+      const parts = [];
+      if (text) parts.push(text);
+      if (files.length) parts.push('Files: ' + files.join(', '));
+      if (dirFiles.length) parts.push('Directory: ' + dirFiles.length + ' files');
+      return parts.join('\n---\n');
+    };
+  } else if (probe.kind === 'interview') {
     const ta = el('textarea', { attrs: { rows: '3', placeholder: 'Type your answer…' } });
     inputWrap.appendChild(ta);
     getAnswer = function () { return ta.value; };
