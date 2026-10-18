@@ -2555,13 +2555,12 @@ async function renderNextProbe() {
   const text = $('onboarding-progress-text');
   if (text) text.textContent = 'Step ' + Math.min(completed + 1, total) + ' of ' + total;
 
-  const card = el('div', { class: 'card' });
+  const card = el('div', { class: 'card onboarding-card' });
   card.appendChild(el('h2', { text: probe.name || 'Next step' }));
   if (probe.purpose) card.appendChild(el('p', { class: 'lede', text: probe.purpose }));
   if (probe.question) card.appendChild(el('p', { text: probe.question }));
 
   const inputWrap = el('div', { class: 'field' });
-  /* getAnswer is populated by the control that this probe uses. */
   let getAnswer = function () { return null; };
 
   if (probe.kind === 'interview' && probe.options && probe.options.length) {
@@ -2572,7 +2571,7 @@ async function renderNextProbe() {
     inputWrap.appendChild(select);
     getAnswer = function () { return select.value; };
   } else if (probe.kind === 'interview' || probe.kind === 'source') {
-    const ta = el('textarea', { attrs: { rows: '4', placeholder: 'Type your answer…' } });
+    const ta = el('textarea', { attrs: { rows: '3', placeholder: 'Type your answer…' } });
     inputWrap.appendChild(ta);
     getAnswer = function () { return ta.value; };
   } else if (probe.kind === 'calibration') {
@@ -2598,20 +2597,58 @@ async function renderNextProbe() {
   } else if (probe.kind === 'task') {
     inputWrap.appendChild(el('p', { class: 'lede', text: 'This task runs in your browser. Click "Start task" to begin.' }));
     const startBtn = el('button', { class: 'primary', text: 'Start task', attrs: { type: 'button' } });
+    const cancelBtn = el('button', { text: 'Skip task', attrs: { type: 'button' } });
+    cancelBtn.style.marginLeft = '8px';
     inputWrap.appendChild(startBtn);
+    inputWrap.appendChild(cancelBtn);
     let trials = null;
+    let taskDone = false;
+    let taskRunning = false;
+
+    cancelBtn.addEventListener('click', async function () {
+      if (taskDone || !taskRunning) return;
+      taskDone = true;
+      taskRunning = false;
+      status('task skipped');
+      await api('/api/onboarding/record', {
+        method: 'POST',
+        body: JSON.stringify({ learner_id: LEARNER, probe_id: probe.probe_id, answer: null }),
+      });
+      await renderNextProbe();
+    });
+
     startBtn.addEventListener('click', async function () {
+      if (taskDone || taskRunning) return;
+      taskRunning = true;
       startBtn.disabled = true;
+      cancelBtn.disabled = false;
       try {
         if (typeof TaskEngine !== 'undefined' && TaskEngine.has(probe.task_id)) {
           trials = await TaskEngine.run(probe.task_id, inputWrap, { trials: probe.trials || 40 });
+          taskDone = true;
+          taskRunning = false;
           inputWrap.appendChild(el('p', { class: 'lede', text: 'Task complete. ' + (trials ? trials.length : 0) + ' trials recorded.' }));
+          cancelBtn.disabled = true;
+          startBtn.disabled = true;
+          // Auto-advance after task completion
+          setTimeout(async function () {
+            try {
+              await api('/api/onboarding/record', {
+                method: 'POST',
+                body: JSON.stringify({ learner_id: LEARNER, probe_id: probe.probe_id, answer: trials ? { trials: trials } : null }),
+              });
+              await renderNextProbe();
+            } catch (e) { status(e.message || 'could not record', 'err'); }
+          }, 1500);
         } else {
           inputWrap.appendChild(el('p', { class: 'lede', text: 'Task engine unavailable in this browser.' }));
+          startBtn.disabled = false;
+          taskRunning = false;
         }
       } catch (err) {
         inputWrap.appendChild(el('p', { class: 'lede', text: 'Task error: ' + err.message }));
         startBtn.disabled = false;
+        taskRunning = false;
       }
     });
     getAnswer = function () { return trials ? { trials: trials } : null; };

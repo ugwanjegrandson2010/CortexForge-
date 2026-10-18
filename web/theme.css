@@ -3559,7 +3559,14 @@ input:focus, textarea:focus, select:focus {
 .command-palette-item:hover, .command-palette-item.selected { background-color: var(--surface-card); color: var(--text-primary); }
 .command-palette-empty { padding: var(--space-6); text-align: center; font-size: 14px; color: var(--text-quaternary); }
 
-/* — Onboarding — */
+/* Onboarding */
+.onboarding-card {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.onboarding-card textarea {
+  resize: none;
+}
 .onboarding-wrap, .auth-wrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-6); }
 .onboarding-card, .auth-card {
   width: 100%;
