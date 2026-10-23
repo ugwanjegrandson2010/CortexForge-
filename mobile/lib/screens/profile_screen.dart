@@ -189,13 +189,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _ObservationCard(observation: obs),
           ] else ...[
             const SizedBox(height: 16),
-            Card(
+            const Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(16),
                 child: Text(
                   'No behavioural observations yet. Complete the onboarding '
                   'probes and they will appear here with confidence labels.',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: CfColors.textDim,
                     fontSize: 13,
                     height: 1.4,

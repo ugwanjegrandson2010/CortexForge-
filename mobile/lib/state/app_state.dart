@@ -23,8 +23,7 @@ class AppState extends ChangeNotifier {
   String _statusMessage = '';
   bool _busy = false;
 
-  AppState({CortexForgeApi? api})
-      : api = api ?? CortexForgeApi();
+  AppState({CortexForgeApi? api}) : api = api ?? CortexForgeApi();
 
   AuthStatus get authStatus => _authStatus;
   bool get isSignedIn => _authStatus == AuthStatus.signedIn;
@@ -95,7 +94,8 @@ class AppState extends ChangeNotifier {
     _email = session.email;
     _sessionToken = session.sessionToken;
     _authStatus = AuthStatus.signedIn;
-    _statusMessage = 'Signed in as ${session.displayName.isEmpty ? session.learnerId : session.displayName}';
+    _statusMessage =
+        'Signed in as ${session.displayName.isEmpty ? session.learnerId : session.displayName}';
     notifyListeners();
   }
 

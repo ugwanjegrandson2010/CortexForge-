@@ -158,7 +158,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 if (v == null || v.trim().isEmpty) {
                                   return 'Enter your email';
                                 }
-                                if (!v.contains('@')) return 'Enter a valid email';
+                                if (!v.contains('@')) {
+                                  return 'Enter a valid email';
+                                }
                                 return null;
                               },
                             ),
@@ -201,7 +203,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                         color: Colors.white,
                                       ),
                                     )
-                                  : Text(_isRegister ? 'Create account' : 'Sign in'),
+                                  : Text(_isRegister
+                                      ? 'Create account'
+                                      : 'Sign in'),
                             ),
                             const SizedBox(height: 8),
                             TextButton(

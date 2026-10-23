@@ -244,8 +244,7 @@ class CalibrationStats {
     required this.n,
   });
 
-  factory CalibrationStats.fromJson(Map<String, dynamic> j) =>
-      CalibrationStats(
+  factory CalibrationStats.fromJson(Map<String, dynamic> j) => CalibrationStats(
         bias: _toDouble(j['bias']),
         brier: _toDouble(j['brier']),
         n: _toInt(j['n']),
@@ -347,7 +346,7 @@ List<String> _toStringList(dynamic v) {
 List<Map<String, dynamic>> _toMapList(dynamic v) {
   if (v is List) {
     return v
-        .whereType<Map>()
+        .whereType<Map<String, dynamic>>()
         .map((e) => e.cast<String, dynamic>())
         .toList(growable: false);
   }

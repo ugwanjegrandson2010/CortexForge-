@@ -117,8 +117,7 @@ void main() {
     expect(find.textContaining('Server connected'), findsOneWidget);
   });
 
-  testWidgets('reports an unreachable server without crashing',
-      (tester) async {
+  testWidgets('reports an unreachable server without crashing', (tester) async {
     await tester.pumpWidget(_app(serverUp: false));
     await tester.pumpAndSettle();
     expect(find.textContaining('No server found'), findsOneWidget);
@@ -173,7 +172,14 @@ void main() {
   testWidgets('local mode signs in without an account', (tester) async {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Use this device only'));
+    final localButton =
+        find.widgetWithText(OutlinedButton, 'Use this device only');
+    // The sign-in form is taller than the default 800x600 test viewport, so
+    // the local-mode button starts below the fold. Scroll it into view before
+    // tapping, otherwise the tap lands outside the render tree.
+    await tester.ensureVisible(localButton);
+    await tester.pumpAndSettle();
+    await tester.tap(localButton);
     await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
   });

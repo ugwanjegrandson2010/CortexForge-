@@ -143,7 +143,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.delete_outline, color: CfColors.bad),
+                  leading:
+                      const Icon(Icons.delete_outline, color: CfColors.bad),
                   title: const Text(
                     'Erase all data',
                     style: TextStyle(color: CfColors.bad),

@@ -23,7 +23,6 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  List<Probe> _probes = [];
   OnboardingProgress? _progress;
   Probe? _current;
   bool _loading = true;
@@ -55,16 +54,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _contractSummary = null;
     });
     try {
-      final res = await widget.state.api
-          .onboardingStart(widget.state.learnerId);
-      final probes = (res['probes'] as List?)
-              ?.whereType<Map>()
-              .map((e) => Probe.fromJson(e.cast<String, dynamic>()))
-              .toList() ??
-          [];
+      final res =
+          await widget.state.api.onboardingStart(widget.state.learnerId);
       if (!mounted) return;
       setState(() {
-        _probes = probes;
         _progress = OnboardingProgress.fromJson(
           (res['progress'] as Map?)?.cast<String, dynamic>() ?? {},
         );
@@ -82,8 +75,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _nextProbe() async {
     try {
-      final res =
-          await widget.state.api.onboardingNext(widget.state.learnerId);
+      final res = await widget.state.api.onboardingNext(widget.state.learnerId);
       final probeJson = res['probe'];
       if (!mounted) return;
       setState(() {
@@ -273,9 +265,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   i == _selectedOption
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
-                  color: i == _selectedOption
-                      ? CfColors.accent
-                      : CfColors.textDim,
+                  color:
+                      i == _selectedOption ? CfColors.accent : CfColors.textDim,
                 ),
                 title: Text(
                   probe.options[i],

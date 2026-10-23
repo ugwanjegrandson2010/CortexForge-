@@ -28,28 +28,24 @@ class CortexForgeApi {
   final String baseUrl;
 
   /// Per-user API token. Empty until an account is created or logged into.
-  String _token;
+  String token;
 
   final http.Client _client;
   final Duration timeout;
 
   CortexForgeApi({
     this.baseUrl = 'http://127.0.0.1:8731',
-    String token = '',
+    this.token = '',
     http.Client? client,
     this.timeout = const Duration(seconds: 30),
-  })  : _token = token,
-        _client = client ?? http.Client();
+  }) : _client = client ?? http.Client();
 
-  String get token => _token;
-  bool get hasToken => _token.isNotEmpty;
-
-  set token(String value) => _token = value;
+  bool get hasToken => token.isNotEmpty;
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        if (_token.isNotEmpty) 'X-CortexForge-Token': _token,
+        if (token.isNotEmpty) 'X-CortexForge-Token': token,
       };
 
   Uri _uri(String path, [Map<String, dynamic>? params]) {
@@ -136,7 +132,7 @@ class CortexForgeApi {
       'display_name': displayName,
     });
     final session = AccountSession.fromJson(j);
-    _token = session.apiToken;
+    token = session.apiToken;
     return session;
   }
 
@@ -149,13 +145,13 @@ class CortexForgeApi {
       'password': password,
     });
     final session = AccountSession.fromJson(j);
-    _token = session.apiToken;
+    token = session.apiToken;
     return session;
   }
 
   Future<void> logout(String sessionToken) async {
     await _post('/api/account/logout', {'session_token': sessionToken});
-    _token = '';
+    token = '';
   }
 
   // --- onboarding ----------------------------------------------------------
@@ -266,7 +262,7 @@ class CortexForgeApi {
     final core = (mcp['core'] as List?)?.map((e) => e.toString()).toSet() ?? {};
     if (catalogue is List) {
       return catalogue
-          .whereType<Map>()
+          .whereType<Map<String, dynamic>>()
           .map((e) => McpServer.fromJson({
                 ...e.cast<String, dynamic>(),
                 'core': core.contains(e['key']?.toString()),

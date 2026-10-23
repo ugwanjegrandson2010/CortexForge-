@@ -173,7 +173,9 @@ class _HeroCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              due == 0 ? 'Nothing is due' : '$due item${due == 1 ? '' : 's'} due',
+              due == 0
+                  ? 'Nothing is due'
+                  : '$due item${due == 1 ? '' : 's'} due',
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w700,
@@ -208,17 +210,17 @@ class _HonestVerdict extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (session.items.isEmpty) return const SizedBox.shrink();
-    return Card(
+    return const Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(16),
         child: Row(
           children: [
-            const Icon(Icons.timelapse, color: CfColors.textDim, size: 20),
-            const SizedBox(width: 12),
+            Icon(Icons.timelapse, color: CfColors.textDim, size: 20),
+            SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Target success band: 75–90%. Failing about one item in seven is the design, not a problem.',
-                style: const TextStyle(
+                style: TextStyle(
                   color: CfColors.textDim,
                   fontSize: 13,
                   height: 1.4,

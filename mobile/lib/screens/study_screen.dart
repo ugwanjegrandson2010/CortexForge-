@@ -137,11 +137,13 @@ class _StudyScreenState extends State<StudyScreen> {
         ),
       );
     }
-    if (_finished) return _Summary(
-          history: _history,
-          confidences: _confidences,
-          onRestart: _load,
-        );
+    if (_finished) {
+      return _Summary(
+        history: _history,
+        confidences: _confidences,
+        onRestart: _load,
+      );
+    }
 
     final item = _items[_index];
     return ListView(
@@ -325,7 +327,8 @@ class _Feedback extends StatelessWidget {
                 const Divider(height: 24),
                 Row(
                   children: [
-                    _mini('Mastery', '${(result.pKnown * 100).toStringAsFixed(0)}%'),
+                    _mini('Mastery',
+                        '${(result.pKnown * 100).toStringAsFixed(0)}%'),
                     const SizedBox(width: 20),
                     _mini(
                       'Next review',
@@ -386,7 +389,8 @@ class _Summary extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.inbox_outlined, size: 40, color: CfColors.textDim),
+              const Icon(Icons.inbox_outlined,
+                  size: 40, color: CfColors.textDim),
               const SizedBox(height: 12),
               const Text(
                 'Nothing is due right now.',
@@ -399,7 +403,8 @@ class _Summary extends StatelessWidget {
                 style: TextStyle(color: CfColors.textDim, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              OutlinedButton(onPressed: onRestart, child: const Text('Refresh')),
+              OutlinedButton(
+                  onPressed: onRestart, child: const Text('Refresh')),
             ],
           ),
         ),

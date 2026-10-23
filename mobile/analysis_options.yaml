@@ -16,3 +16,8 @@ analyzer:
     # Treat unused imports/variables as errors so dead code cannot accumulate.
     unused_import: error
     unused_local_variable: error
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - linux/**

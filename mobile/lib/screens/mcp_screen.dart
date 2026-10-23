@@ -199,8 +199,7 @@ class _ServerCard extends StatelessWidget {
             if (server.core) ...[
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: CfColors.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(5),

@@ -174,7 +174,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
             Card(
               child: ListTile(
                 leading: Icon(
-                  s == _lastSource ? Icons.check_circle : Icons.description_outlined,
+                  s == _lastSource
+                      ? Icons.check_circle
+                      : Icons.description_outlined,
                   color: s == _lastSource ? CfColors.good : CfColors.textDim,
                 ),
                 title: Text('${s.nChars} characters'),
@@ -206,7 +208,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
                       children: [
                         _Chip(q.style),
                         const SizedBox(width: 8),
-                        if (q.bloomLevel.isNotEmpty) _Chip(q.bloomLevel, dim: true),
+                        if (q.bloomLevel.isNotEmpty)
+                          _Chip(q.bloomLevel, dim: true),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -267,7 +270,8 @@ class _Chip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: dim ? CfColors.surfaceAlt : CfColors.accent.withValues(alpha: 0.15),
+        color:
+            dim ? CfColors.surfaceAlt : CfColors.accent.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
           color: dim ? CfColors.border : CfColors.accent.withValues(alpha: 0.4),
