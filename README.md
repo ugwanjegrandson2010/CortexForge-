@@ -60,8 +60,9 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/python -m cortexforge.server
 ```
 
-Open `http://127.0.0.1:8731`. The server prints an API token on startup; paste
-it into the app when prompted (the app stores it in session storage only).
+Open `http://127.0.0.1:8731` and create an account — each account gets its own
+API token, sent as the `X-CortexForge-Token` header on every write. The app
+stores it in session storage only; `/api/health` never exposes one.
 
 Or without installing:
 
@@ -79,13 +80,12 @@ no compiled extensions — so it runs on CPUs without AVX or SSE4.
 ## Verify it works
 
 ```bash
-# 224 unit tests
-.venv/bin/python -m unittest discover -s tests
+# 785 unit tests
+.venv/bin/python -m pytest -q
 
-# 45 end-to-end API checks against a running server
+# 58 end-to-end API checks against a running server (provisions its own token)
 .venv/bin/python -m cortexforge.server --port 8731 --db /tmp/cf.db &
-TOKEN=$(grep -oP 'API token \(required for writes\): \K\S+' /dev/stdin)
-.venv/bin/python scripts/e2e.py http://127.0.0.1:8731 "$TOKEN"
+.venv/bin/python scripts/e2e.py http://127.0.0.1:8731
 
 # 110 platform and packaging checks
 .venv/bin/python scripts/test_platforms.py

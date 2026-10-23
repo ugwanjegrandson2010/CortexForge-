@@ -11,6 +11,7 @@ Tables
     attempt        every response, with latency and confidence
     skill_state    BKT parameters and current mastery per skill
     card           FSRS scheduling state per question
+    fsrs_weights   per-learner fitted FSRS-4.5 weights (v1.1)
     profile        computed behavioural profile snapshots
     event          append-only audit log
 """
@@ -118,6 +119,15 @@ CREATE TABLE IF NOT EXISTS card (
     PRIMARY KEY (learner_id, qid)
 );
 CREATE INDEX IF NOT EXISTS idx_card_due ON card(learner_id, due_day);
+
+CREATE TABLE IF NOT EXISTS fsrs_weights (
+    learner_id   TEXT PRIMARY KEY,
+    weights      TEXT NOT NULL,
+    n_reviews    INTEGER NOT NULL DEFAULT 0,
+    loss         REAL,
+    fitted_at    REAL NOT NULL,
+    FOREIGN KEY (learner_id) REFERENCES learner(learner_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS profile (
     profile_id  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -321,6 +331,22 @@ class Store:
             "SELECT * FROM attempt WHERE learner_id = ? "
             "ORDER BY attempt_id DESC LIMIT ?", (learner_id, int(limit)))]
 
+    def review_history(self, learner_id: str) -> dict:
+        """Return per-qid review sequences: {qid: [(day, grade), ...]}.
+
+        Grades are reconstructed from the stored ``correct`` flag (0/1) plus
+        the card's own recorded history, so the fitter sees the same
+        Again/Hard/Good/Easy scale the scheduler uses.
+        """
+        out: dict[str, list] = {}
+        for a in self._query(
+                "SELECT qid, correct, day FROM attempt "
+                "WHERE learner_id = ? ORDER BY qid, day, attempt_id",
+                (learner_id,)):
+            out.setdefault(a["qid"], []).append(
+                (float(a["day"]), 3 if a["correct"] else 1))
+        return out
+
     # -- skill state -----------------------------------------------------
     def upsert_skill(self, learner_id: str, skill_id: str, p_known: float,
                      params: dict, opportunities: int, correct: int) -> None:
@@ -354,9 +380,53 @@ class Store:
              float(card.difficulty), int(card.reps), int(card.lapses),
              float(card.last_review_day), float(card.due_day), card.state))
 
+    def card_rows(self, learner_id: str, qids: list) -> list[dict]:
+        """Fetch card rows for a set of qids (chunked, parameterised).
+
+        The ``IN`` list is built from a fixed number of bound ``?`` markers —
+        never from the ids themselves — and chunks are capped at 500 to stay
+        inside SQLite's bound-parameter limit.
+        """
+        if not qids:
+            return []
+        rows: list[dict] = []
+        ids = [str(q) for q in qids]
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            markers = ",".join("?" for _ in chunk)
+            rows.extend(dict(r) for r in self._query(
+                f"SELECT * FROM card WHERE learner_id = ? AND qid IN ({markers})",
+                (learner_id, *chunk)))
+        return rows
+
+    def all_cards(self, learner_id: str) -> list[dict]:
+        """Fetch every card row for a learner (used to hydrate AppState)."""
+        return [dict(r) for r in self._query(
+            "SELECT * FROM card WHERE learner_id = ? ORDER BY due_day",
+            (learner_id,))]
+
     def cards(self, learner_id: str) -> list[dict]:
         return [dict(r) for r in self._query(
             "SELECT * FROM card WHERE learner_id = ?", (learner_id,))]
+
+    # -- fitted FSRS weights ---------------------------------------------
+    def get_fitted_weights(self, learner_id: str) -> list | None:
+        row = self._one("SELECT weights FROM fsrs_weights WHERE learner_id = ?",
+                        (learner_id,))
+        if row is None:
+            return None
+        return load_json_only(row["weights"])
+
+    def save_fitted_weights(self, learner_id: str, weights, n_reviews: int,
+                            loss: float) -> None:
+        self._exec(
+            "INSERT INTO fsrs_weights(learner_id, weights, n_reviews, loss, "
+            "fitted_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(learner_id) DO UPDATE SET "
+            "weights=excluded.weights, n_reviews=excluded.n_reviews, "
+            "loss=excluded.loss, fitted_at=excluded.fitted_at",
+            (learner_id, json.dumps([float(x) for x in weights]),
+             int(n_reviews), float(loss), time.time()))
 
     # -- profiles --------------------------------------------------------
     def save_profile(self, learner_id: str, kind: str, payload: dict) -> None:
@@ -414,6 +484,7 @@ class Store:
             "attempts": self.attempts(learner_id, limit=1000000),
             "skills": self.skill_states(learner_id),
             "cards": self.cards(learner_id),
+            "fsrs_weights": self.get_fitted_weights(learner_id),
             "events": [e for e in self.events(100000)
                        if e["learner_id"] == learner_id],
         }
@@ -421,7 +492,7 @@ class Store:
     def erase_learner(self, learner_id: str) -> None:
         with self.transaction():
             for table in ("attempt", "card", "skill_state", "question",
-                          "source", "profile", "event"):
+                          "source", "profile", "event", "fsrs_weights"):
                 self._exec(f"DELETE FROM {table} WHERE learner_id = ?",
                            (learner_id,))
             self._exec("DELETE FROM learner WHERE learner_id = ?",

@@ -37,6 +37,7 @@ from cortexforge.scheduler import (  # noqa: E402
     Card, DEFAULT_W, build_queue, fit_parameters, interval_for_retention,
     retention_forecast, retrievability, total_loss,
 )
+from cortexforge.server import AppState  # noqa: E402
 from cortexforge.store import Store  # noqa: E402
 from cortexforge.tracing import (  # noqa: E402
     BKTParams, BKTSkill, Item, calibration_stats, select_next_item,
@@ -544,6 +545,72 @@ class TestStore(unittest.TestCase):
         self.store.upsert_card("L1", c)
         self.assertEqual(len(self.store.cards("L1")), 1)
 
+    def test_review_history_grouped_per_qid(self):
+        """Fitting input: sequences are per-card and ordered by day."""
+        self.store.add_attempt("L1", "q1", "sk", True, 1.0, 1, None, "", 0.0)
+        self.store.add_attempt("L1", "q1", "sk", False, 0.0, 1, None, "", 1.0)
+        self.store.add_attempt("L1", "q2", "sk", True, 1.0, 1, None, "", 0.5)
+        hist = self.store.review_history("L1")
+        self.assertEqual(hist["q1"], [(0.0, 3), (1.0, 1)])
+        self.assertEqual(hist["q2"], [(0.5, 3)])
+
+    def test_review_history_empty(self):
+        self.assertEqual(self.store.review_history("L1"), {})
+
+    def test_fitted_weights_roundtrip(self):
+        self.assertIsNone(self.store.get_fitted_weights("L1"))
+        w = list(DEFAULT_W)
+        self.store.save_fitted_weights("L1", w, 42, 12.5)
+        got = self.store.get_fitted_weights("L1")
+        self.assertEqual(len(got), 19)
+        self.assertAlmostEqual(got[0], w[0])
+
+    def test_fitted_weights_overwrite(self):
+        """Re-fitting replaces the row rather than appending."""
+        self.store.save_fitted_weights("L1", list(DEFAULT_W), 10, 5.0)
+        self.store.save_fitted_weights("L1", list(DEFAULT_W), 20, 4.0)
+        rows = self.store._query(
+            "SELECT COUNT(*) AS n FROM fsrs_weights WHERE learner_id = ?",
+            ("L1",))
+        self.assertEqual(rows[0]["n"], 1)
+
+    def test_erase_removes_fitted_weights(self):
+        self.store.save_fitted_weights("L1", list(DEFAULT_W), 10, 5.0)
+        self.store.erase_learner("L1")
+        self.assertIsNone(self.store.get_fitted_weights("L1"))
+
+    def test_card_rows_chunking_and_order(self):
+        c1, c2 = Card("a"), Card("b")
+        c1.review(3, 0.0)
+        c2.review(3, 0.0)
+        self.store.upsert_card("L1", c1)
+        self.store.upsert_card("L1", c2)
+        rows = self.store.card_rows("L1", ["a", "b", "missing"])
+        self.assertEqual(sorted(r["qid"] for r in rows), ["a", "b"])
+
+    def test_card_rows_empty_list(self):
+        self.assertEqual(self.store.card_rows("L1", []), [])
+
+    def test_card_rows_treats_hostile_qid_as_data(self):
+        """A hostile qid must be bound as data, not concatenated into SQL.
+
+        The query must still succeed and simply find nothing — the injection
+        payload has to be inert rather than raising or returning other rows.
+        """
+        c = Card("a")
+        c.review(3, 0.0)
+        self.store.upsert_card("L1", c)
+        rows = self.store.card_rows("L1", ["x' OR '1'='1"])
+        self.assertEqual(rows, [])
+        # and the real row is unaffected by the injection attempt
+        self.assertEqual(len(self.store.card_rows("L1", ["a"])), 1)
+
+    def test_export_includes_fsrs_weights(self):
+        self.store.save_fitted_weights("L1", list(DEFAULT_W), 10, 5.0)
+        exp = self.store.export_learner("L1")
+        self.assertIn("fsrs_weights", exp)
+        self.assertEqual(len(exp["fsrs_weights"]), 19)
+
     def test_profile_save_and_load(self):
         self.store.save_profile("L1", "kind", {"a": 1})
         self.assertEqual(self.store.latest_profile("L1", "kind"), {"a": 1})
@@ -641,6 +708,94 @@ class TestStore(unittest.TestCase):
         for t in ts:
             t.join(timeout=30)
         self.assertEqual(errors, [], f"errors: {errors[:3]}")
+
+
+# ------------------------------------------------------- scheduler persistence
+
+class TestSchedulerPersistence(unittest.TestCase):
+    """v1.1 — review state must survive a process restart.
+
+    Regression: AppState kept cards only in memory, so every restart reset
+    each card to `new` and the whole deck re-appeared as never-reviewed.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "s.db"
+        self.state = AppState(str(self.db), str(Path(__file__).parent.parent / "web"))
+        self.state.store.upsert_learner("L1", "Tester")
+
+    def tearDown(self):
+        self.state.store.close()
+        self.tmp.cleanup()
+
+    def test_card_hydrated_from_store(self):
+        c = Card("q1")
+        c.review(3, 0.0)
+        self.state.store.upsert_card("L1", c)
+
+        fresh = AppState(str(self.db), str(Path(__file__).parent.parent / "web"))
+        try:
+            got = fresh.card_for("L1", "q1")
+            self.assertEqual(got.state, "review")
+            self.assertGreater(got.stability, 0.0)
+            self.assertEqual(got.due_day, c.due_day)
+        finally:
+            fresh.store.close()
+
+    def test_unknown_qid_still_creates_new_card(self):
+        card = self.state.card_for("L1", "never-seen")
+        self.assertEqual(card.state, "new")
+        self.assertEqual(card.stability, 0.0)
+
+    def test_hydrate_cards_loads_whole_deck(self):
+        for i in range(3):
+            c = Card(f"q{i}")
+            c.review(3, 0.0)
+            self.state.store.upsert_card("L1", c)
+        n = self.state.hydrate_cards("L1")
+        self.assertEqual(n, 3)
+        self.assertEqual(len(self.state.cards["L1"]), 3)
+
+    def test_hydrate_cards_does_not_clobber_live_state(self):
+        """A card already advanced in memory must not be reset by hydration."""
+        c = Card("q1")
+        c.review(3, 0.0)
+        self.state.store.upsert_card("L1", c)
+        self.state.hydrate_cards("L1")
+        live = self.state.cards["L1"]["q1"]
+        live.review(1, 0.5)  # lapse in memory
+        self.state.hydrate_cards("L1")
+        self.assertEqual(self.state.cards["L1"]["q1"].lapses, 1)
+
+    def test_weights_default_then_fitted(self):
+        self.assertEqual(self.state.weights_for("L1"), list(DEFAULT_W))
+        w = list(DEFAULT_W)
+        w[0] = 0.5
+        self.state.store.save_fitted_weights("L1", w, 12, 3.0)
+        self.state.invalidate_weights("L1")
+        self.assertEqual(self.state.weights_for("L1"), w)
+
+    def test_weights_survive_new_state_object(self):
+        w = list(DEFAULT_W)
+        w[0] = 0.5
+        self.state.store.save_fitted_weights("L1", w, 12, 3.0)
+        fresh = AppState(str(self.db), str(Path(__file__).parent.parent / "web"))
+        try:
+            self.assertEqual(fresh.weights_for("L1"), w)
+        finally:
+            fresh.store.close()
+
+    def test_fit_uses_learner_history(self):
+        """Fitted weights are computed from this learner's own attempts."""
+        for i in range(12):
+            self.state.store.add_attempt(
+                "L1", f"q{i % 3}", "sk", i % 4 != 0, 1.0, 1, None, "", float(i))
+        history = self.state.store.review_history("L1")
+        self.assertEqual(sum(len(s) for s in history.values()), 12)
+        w = fit_parameters(list(history.values()), max_iter=25)
+        self.assertEqual(len(w), 19)
+        self.assertTrue(all(x > 0 for x in w))
 
 
 # -------------------------------------------------------------- instruments

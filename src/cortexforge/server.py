@@ -18,6 +18,8 @@ Endpoints
     POST /api/erase              erase all learner data
     GET  /api/mcp/plan           onboarding plan for MCP
     POST /api/mcp/config         write mcp.json
+    GET  /api/scheduler/weights  FSRS weights in effect for a learner
+    POST /api/scheduler/fit      fit FSRS weights from the learner's history
 
 Security posture (see security.py for the CVE mapping):
   * Bound to 127.0.0.1 by default; never 0.0.0.0 without an explicit flag.
@@ -38,6 +40,7 @@ import os
 import re
 import threading
 import time
+import traceback
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,7 +63,9 @@ from .neuroprotection import NeuroProtectionSystem, Trial
 from .onboarding import Onboarding, PROBES, PROBES_BY_ID
 from .profile import build_profile, grade_feedback, session_summary
 from .questiongen import ALL_STYLES, Question, generate_from_source, interleave
-from .scheduler import Card, build_queue, retention_forecast
+from .scheduler import (DEFAULT_W, MIN_LOSS_FOR_FIT, MIN_REVIEWS_FOR_FIT,
+                        Card, build_queue, fit_parameters,
+                        retention_forecast, total_loss)
 from .security import (MAX_DOCUMENT_BYTES, SecurityError, escape_html,
                        load_json_only, safe_join, sanitise_text,
                        security_headers, secure_token)
@@ -86,6 +91,7 @@ class AppState:
         self.items: dict[str, list[Item]] = {}
         self.theta: dict[str, float] = {}
         self.cards: dict[str, dict[str, Card]] = {}
+        self.weights: dict[str, list] = {}
         self.day_zero: dict[str, float] = {}
         self.tutors: dict[str, TutorHarness] = {}
         self.session_runners: dict[str, SessionRunner] = {}
@@ -109,10 +115,68 @@ class AppState:
         return bucket[skill_id]
 
     def card_for(self, learner_id: str, qid: str) -> Card:
+        """Return the live card for `qid`, hydrating it from the store on
+        first touch.
+
+        Without hydration every process restart reset each card to `new`, so
+        due-day, stability and difficulty were silently discarded and the
+        whole deck re-appeared as never-reviewed.
+        """
         bucket = self.cards.setdefault(learner_id, {})
         if qid not in bucket:
-            bucket[qid] = Card(qid)
+            row = self.state_card_row(learner_id, qid)
+            if row is not None:
+                bucket[qid] = Card(
+                    qid,
+                    stability=float(row["stability"] or 0.0),
+                    difficulty=float(row["difficulty"] or 0.0),
+                    reps=int(row["reps"] or 0),
+                    lapses=int(row["lapses"] or 0),
+                    last_review_day=float(row["last_day"] or 0.0),
+                    due_day=float(row["due_day"] or 0.0),
+                    state=str(row["state"] or "new"),
+                )
+            else:
+                bucket[qid] = Card(qid)
         return bucket[qid]
+
+    def state_card_row(self, learner_id: str, qid: str) -> dict | None:
+        rows = self.store.card_rows(learner_id, [qid])
+        return rows[0] if rows else None
+
+    def hydrate_cards(self, learner_id: str) -> int:
+        """Load every persisted card for a learner into memory.
+
+        Called before queue/forecast work so a restarted process still knows
+        which items are due. Returns the number of cards loaded.
+        """
+        bucket = self.cards.setdefault(learner_id, {})
+        n = 0
+        for row in self.store.all_cards(learner_id):
+            if row["qid"] in bucket:
+                continue
+            bucket[row["qid"]] = Card(
+                row["qid"],
+                stability=float(row["stability"] or 0.0),
+                difficulty=float(row["difficulty"] or 0.0),
+                reps=int(row["reps"] or 0),
+                lapses=int(row["lapses"] or 0),
+                last_review_day=float(row["last_day"] or 0.0),
+                due_day=float(row["due_day"] or 0.0),
+                state=str(row["state"] or "new"),
+            )
+            n += 1
+        return n
+
+    def weights_for(self, learner_id: str) -> list:
+        """FSRS weights for a learner: fitted, else the published defaults."""
+        if learner_id not in self.weights:
+            fitted = self.store.get_fitted_weights(learner_id)
+            self.weights[learner_id] = list(fitted) if fitted else list(DEFAULT_W)
+        return self.weights[learner_id]
+
+    def invalidate_weights(self, learner_id: str) -> None:
+        self.weights.pop(learner_id, None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -247,6 +311,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._neuroprotection_status_get(query)
             if path == "/api/evaluation/battery":
                 return self._evaluation_battery_get(query)
+            if path == "/api/scheduler/weights":
+                return self._scheduler_weights_get(query)
             if path == "/api/account/verify":
                 return self._account_verify_get(query)
             return self._error(404, "not found")
@@ -313,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._evaluation_respond(body)
             if path == "/api/learner-profile/update":
                 return self._learner_profile_update(body)
+            if path == "/api/scheduler/fit":
+                return self._scheduler_fit(body)
             if path == "/api/account/create":
                 return self._account_create(body)
             if path == "/api/account/login":
@@ -329,6 +397,9 @@ class Handler(BaseHTTPRequestHandler):
         except SecurityError as exc:
             return self._error(400, str(exc))
         except Exception as exc:
+            # Log the traceback to stderr for diagnosis, but never to the
+            # client: it can leak paths and internal structure.
+            traceback.print_exc()
             self.state.store.log_event("error", f"{type(exc).__name__}: {exc}")
             return self._error(500, "internal error")
 
@@ -452,7 +523,9 @@ class Handler(BaseHTTPRequestHandler):
         if not lid:
             return self._error(400, "learner_id required")
         day = self.state.day(lid)
-        cards = list(self.state.cards.get(lid, {}).values())
+        with self.state.lock:
+            self.state.hydrate_cards(lid)
+            cards = list(self.state.cards.get(lid, {}).values())
         queue = build_queue(cards, day, limit=int((query.get("limit") or ["20"])[0]))
         qmap = {q["qid"]: q for q in self.state.store.list_questions(lid, limit=5000)}
         items = [qmap[c.item_id] for c in queue if c.item_id in qmap]
@@ -477,7 +550,7 @@ class Handler(BaseHTTPRequestHandler):
         day = self.state.day(lid)
         with self.state.lock:
             card = self.state.card_for(lid, qid)
-            sched = card.review(grade, day)
+            sched = card.review(grade, day, self.state.weights_for(lid))
             skill_id = sanitise_text(str(body.get("skill_id", "general")), 100)
             skill = self.state.skill_for(lid, skill_id)
             p_known = skill.update(correct)
@@ -505,7 +578,9 @@ class Handler(BaseHTTPRequestHandler):
         attempts = self.state.store.attempts(lid, limit=10000)
         pairs = [(a["confidence"], bool(a["correct"])) for a in attempts
                  if a["confidence"] is not None]
-        cards = list(self.state.cards.get(lid, {}).values())
+        with self.state.lock:
+            self.state.hydrate_cards(lid)
+            cards = list(self.state.cards.get(lid, {}).values())
         day = self.state.day(lid)
         forecast = retention_forecast(cards, day)
         skills = self.state.store.skill_states(lid)
@@ -844,6 +919,88 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"learner_id": lid, "result": result.to_dict(),
                     "observations": observations})
 
+    # -- scheduler / FSRS weights ----------------------------------------
+
+    MIN_REVIEWS_FOR_FIT = MIN_REVIEWS_FOR_FIT
+
+    def _scheduler_weights_get(self, query: dict) -> None:
+        """Report the FSRS weights in effect for a learner."""
+        lid = (query.get("learner_id") or [""])[0]
+        if not lid:
+            return self._error(400, "learner_id required")
+        row = self.state.store._one(
+            "SELECT weights, n_reviews, loss, fitted_at FROM fsrs_weights "
+            "WHERE learner_id = ?", (lid,))
+        weights = self.state.weights_for(lid)
+        fitted = row is not None
+        self._json({
+            "learner_id": lid,
+            "weights": [round(float(w), 6) for w in weights],
+            "fitted": fitted,
+            "n_reviews": int(row["n_reviews"]) if fitted else 0,
+            "loss": round(float(row["loss"]), 6) if fitted and row["loss"] is not None else None,
+            "using_defaults": not fitted,
+            "n_reviews_available": self.state.store._query(
+                "SELECT COUNT(*) AS n FROM attempt WHERE learner_id = ?",
+                (lid,))[0]["n"],
+            "min_reviews_for_fit": self.MIN_REVIEWS_FOR_FIT,
+        })
+
+    def _scheduler_fit(self, body: dict) -> None:
+        """Fit FSRS-4.5 weights from the learner's own review history.
+
+        Fitting is deliberately conservative: with fewer than ten recorded
+        reviews the defaults are returned untouched, because fitting on too
+        little data produces noise rather than signal. ``max_iter`` is
+        validated before the history is read so a malformed request is a 400
+        rather than a misleading 409.
+        """
+        lid = self._learner_id(body)
+        try:
+            max_iter = int(body.get("max_iter") or 200)
+        except (TypeError, ValueError):
+            return self._error(400, "max_iter must be an integer")
+        max_iter = max(1, min(2000, max_iter))
+        history = self.state.store.review_history(lid)
+        sequences = [seq for seq in history.values() if seq]
+        n_reviews = sum(len(s) for s in sequences)
+        if n_reviews < self.MIN_REVIEWS_FOR_FIT:
+            return self._error(409, (
+                f"need at least {self.MIN_REVIEWS_FOR_FIT} reviews to fit; "
+                f"found {n_reviews}"))
+        with self.state.lock:
+            w = fit_parameters(sequences, max_iter=max_iter)
+            loss = total_loss(w, sequences)
+            # A zero (or near-zero) loss means the reviews carry no signal —
+            # typically every review landed on the same day, so predicted
+            # retrievability was 1.0 for all of them. Persisting weights from
+            # that would be storing noise as if it were a fit.
+            if loss <= MIN_LOSS_FOR_FIT:
+                return self._json({
+                    "learner_id": lid,
+                    "fitted": False,
+                    "reason": ("reviews carry no scheduling signal: predicted "
+                               "retrievability was 1.0 for every review, so "
+                               "there is nothing to fit against"),
+                    "n_reviews": n_reviews,
+                    "n_cards": len(sequences),
+                    "loss": round(loss, 6),
+                    "weights": [round(float(x), 6) for x in self.state.weights_for(lid)],
+                })
+            self.state.store.save_fitted_weights(lid, w, n_reviews, loss)
+            self.state.invalidate_weights(lid)
+            self.state.store.log_event(
+                "fsrs_fit", f"{n_reviews} reviews, loss {loss:.4f}", lid)
+        self._json({
+            "learner_id": lid,
+            "fitted": True,
+            "n_reviews": n_reviews,
+            "n_cards": len(sequences),
+            "loss": round(loss, 6),
+            "weights": [round(float(x), 6) for x in w],
+            "max_iter": max_iter,
+        })
+
     # -- account ---------------------------------------------------------
 
     def _account_verify_get(self, query: dict) -> None:
@@ -939,8 +1096,13 @@ def main() -> None:
     httpd = make_server(args.db, args.static, args.host, args.port)
     app: AppState = httpd.app  # type: ignore[attr-defined]
     print(f"CortexForge {__version__} listening on http://{args.host}:{args.port}")
-    print(f"API token (required for writes): {app.token}")
     print(f"Database: {args.db}")
+    print("Authentication is per-account. Create one to get a token:")
+    print("  curl -X POST http://%s:%d/api/account/create \\"
+          % (args.host, args.port))
+    print("    -H 'Content-Type: application/json' \\")
+    print('    -d \'{"email":"you@example.com","password":"Str0ngPass!","display_name":"Me"}\'')
+    print("The response includes api_token — send it as X-CortexForge-Token.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

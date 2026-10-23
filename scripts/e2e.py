@@ -7,8 +7,12 @@ Exits non-zero on the first failure.
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8731"
 TOKEN = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -57,6 +61,24 @@ the mitochondria and releases energy rather than storing it. The overall yield
 is approximately 6 molecules of oxygen per molecule of glucose."""
 
 
+def _provision_token() -> str:
+    """Create a throwaway account and return its API token.
+
+    Tokens are per-account (there is no shared server token any more), so the
+    harness provisions its own rather than asking the caller to paste one. The
+    email is run-unique so repeat runs against the same database do not collide
+    on "email already registered".
+    """
+    email = f"e2e+{int(time.time() * 1000)}@example.com"
+    st, body = call("POST", "/api/account/create",
+                    {"email": email, "password": "E2eProbePass123!",
+                     "display_name": "E2E Probe"})
+    if st not in (200, 201) or not body or not body.get("api_token"):
+        print(f"  SKIP  could not provision a token (status {st})")
+        return ""
+    return body["api_token"]
+
+
 def main():
     print(f"E2E against {BASE}\n")
 
@@ -64,6 +86,9 @@ def main():
     st, health = call("GET", "/api/health")
     check("health returns 200", st == 200, st)
     check("health reports ok", health and health.get("ok") is True)
+    # Tokens are per-account now, so /api/health must not leak one.
+    check("health does not expose a token",
+          not (health and "token" in health))
     st, man = call("GET", "/api/manifest")
     check("manifest returns 200", st == 200, st)
     check("manifest lists tasks", man and len(man["tasks"]["tasks"]) >= 15,
@@ -77,6 +102,11 @@ def main():
     st, _ = call("POST", "/api/onboarding/start", {"learner_id": "e2e"},
                  token="wrong-token")
     check("write with wrong token is rejected", st == 401, st)
+    global TOKEN
+    if not TOKEN:
+        # Provision a throwaway account so the run is self-contained and
+        # repeatable; the email carries a run-unique suffix.
+        TOKEN = _provision_token()
     if not TOKEN:
         print("  SKIP  token-dependent checks (no token supplied)")
         return report()
@@ -227,7 +257,88 @@ def main():
     check("data actually erased",
           exp2 and exp2.get("learner") is None and not exp2.get("questions"))
 
-    print("\n[11] input validation")
+    print("\n[11] scheduler weights and fitting")
+    # Use a dedicated learner: section [10] erased `e2e`, and fitting needs a
+    # review history that survives.
+    slid = "e2e-scheduler"
+    call("POST", "/api/onboarding/start", {"learner_id": slid}, TOKEN)
+    st, ssrc = call("POST", "/api/source",
+                    {"learner_id": slid, "title": "Scheduler source",
+                     "text": SOURCE}, TOKEN)
+    ssid = ssrc.get("source_id")
+    st, sgen = call("POST", "/api/generate",
+                    {"learner_id": slid, "source_id": ssid, "max_per_style": 1},
+                    TOKEN)
+    st, w0 = call("GET", f"/api/scheduler/weights?learner_id={slid}")
+    check("weights endpoint returns 200", st == 200, st)
+    check("weights has 19 entries", w0 and len(w0.get("weights", [])) == 19,
+          len(w0.get("weights", [])) if w0 else None)
+    check("weights start as defaults", w0 and w0.get("using_defaults") is True)
+    check("fit refused below review threshold",
+          call("POST", "/api/scheduler/fit", {"learner_id": slid}, TOKEN)[0] == 409)
+    # Build enough history to fit: repeated reviews of the same items on
+    # distinct days, so the sequences have length AND elapsed time. (All-same-
+    # day reviews give R == 1.0 and a zero loss, which carries no signal.)
+    for i in range(16):
+        q = sgen["questions"][i % len(sgen["questions"])]
+        call("POST", "/api/attempt",
+             {"learner_id": slid, "qid": q["qid"], "skill_id": q["skill_id"],
+              "correct": True, "grade": 3, "latency_ms": 900,
+              "confidence": 0.7, "response": "fit"}, TOKEN)
+    # A fresh learner's reviews all land on day 0, so predicted retrievability
+    # is 1.0 for every one of them and the loss is exactly 0. The endpoint must
+    # say so honestly rather than persisting noise as a "fit".
+    st, fit = call("POST", "/api/scheduler/fit",
+                   {"learner_id": slid, "max_iter": 25}, TOKEN)
+    check("fit refused when reviews carry no signal",
+          st == 200 and fit.get("fitted") is False, st)
+    check("degenerate fit explains itself",
+          fit and "no scheduling signal" in fit.get("reason", ""), fit)
+    check("degenerate fit persists nothing",
+          call("GET", f"/api/scheduler/weights?learner_id={slid}")[1]
+          .get("using_defaults") is True)
+    st, _ = call("POST", "/api/scheduler/fit",
+                 {"learner_id": slid, "max_iter": "notanumber"}, TOKEN)
+    check("non-numeric max_iter rejected", st == 400, st)
+    # Cleanup: erase the extra learner so the run is repeatable.
+    call("POST", "/api/erase", {"learner_id": slid, "confirm": "ERASE"}, TOKEN)
+
+    # A genuinely spaced history must produce a real fit. The API derives the
+    # day from the learner's epoch, so distinct days are simulated directly.
+    print("\n[12] fit from a spaced review history")
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from cortexforge.store import Store
+    from cortexforge.scheduler import (DEFAULT_W, fit_parameters,
+                                       total_loss)
+    tmp = _tf.TemporaryDirectory()
+    st2 = Store(_P(tmp.name) / "f.db")
+    st2.upsert_learner("spaced", "Spaced")
+    seqs = []
+    for c in range(4):
+        grades = [3, 1, 3, 4, 3, 3, 2, 4, 3, 1, 3, 4]
+        seq = [(float(i * 2), g) for i, g in enumerate(grades)]
+        seqs.append(seq)
+        for day, g in seq:
+            st2.add_attempt("spaced", f"q{c}", "sk", g >= 3,
+                            1.0 if g >= 3 else 0.0, 900, 0.7, "x", day)
+    before = total_loss(DEFAULT_W, seqs)
+    w = fit_parameters(seqs, max_iter=60)
+    after = total_loss(w, seqs)
+    check("fit reduces loss on real history", after < before,
+          f"{after} vs {before}")
+    check("fitted weights are finite and positive",
+          all(x > 0 for x in w) and len(w) == 19)
+    st2.save_fitted_weights("spaced", w, sum(len(s) for s in seqs), after)
+    check("fitted weights round-trip through the store",
+          st2.get_fitted_weights("spaced") is not None)
+    st2.erase_learner("spaced")
+    check("erase clears fitted weights",
+          st2.get_fitted_weights("spaced") is None)
+    st2.close()
+    tmp.cleanup()
+
+    print("\n[13] input validation")
     st, _ = call("POST", "/api/source", {"learner_id": "bad id!", "text": "x"}, TOKEN)
     check("invalid learner_id rejected", st == 400, st)
     st, _ = call("POST", "/api/generate",

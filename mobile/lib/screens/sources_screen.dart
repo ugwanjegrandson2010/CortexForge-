@@ -179,7 +179,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                 ),
                 title: Text('${s.nChars} characters'),
                 subtitle: Text(
-                  'sha ${s.sha256.substring(0, s.sha256.length.clamp(0, 12))}',
+                  'sha ${_shortSha(s.sha256)}',
                   style: const TextStyle(fontSize: 11, color: CfColors.textDim),
                 ),
                 onTap: () => setState(() => _lastSource = s),
@@ -235,8 +235,12 @@ class _SourcesScreenState extends State<SourcesScreen> {
   }
 }
 
+/// First 12 characters of a hex digest, for a compact identifier.
+String _shortSha(String sha) => sha.length <= 12 ? sha : sha.substring(0, 12);
+
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text);
+
   final String text;
 
   @override

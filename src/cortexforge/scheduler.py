@@ -246,6 +246,13 @@ def total_loss(w, review_sequences: list) -> float:
     return sum(_replay_loss(list(w), rev) for rev in review_sequences)
 
 
+MIN_REVIEWS_FOR_FIT = 10
+# Below this the loss carries no information: with every review on the same
+# day the elapsed time is zero, so predicted retrievability is exactly 1.0
+# and the loss is identically 0. Fitting there is pure noise.
+MIN_LOSS_FOR_FIT = 1e-3
+
+
 def fit_parameters(review_sequences: list, initial: Iterable[float] = None,
                    max_iter: int = 500, tolerance: float = 1e-6) -> tuple:
     """Fit FSRS weights from review sequences using coordinate descent.
@@ -261,11 +268,15 @@ def fit_parameters(review_sequences: list, initial: Iterable[float] = None,
     data would produce noise, not signal.
     """
     n_reviews = sum(len(r) for r in review_sequences)
-    if n_reviews < 10:
+    if n_reviews < MIN_REVIEWS_FOR_FIT:
         return tuple(initial) if initial is not None else DEFAULT_W
 
     w = list(initial) if initial is not None else list(DEFAULT_W)
     best_loss = total_loss(w, review_sequences)
+    # Degenerate input: every review on one day means elapsed == 0, so R == 1.0
+    # and the loss is exactly 0. There is no signal to fit against.
+    if best_loss <= MIN_LOSS_FOR_FIT:
+        return tuple(DEFAULT_W)
 
     for _ in range(max_iter):
         improved = False
