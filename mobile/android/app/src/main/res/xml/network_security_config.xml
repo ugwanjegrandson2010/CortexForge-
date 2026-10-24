@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CortexForge's server binds to loopback only and speaks plain HTTP
+  (http://127.0.0.1:8731). Android blocks cleartext traffic by default from
+  API 28 onwards, which would stop the client from reaching the server at all.
+
+  Cleartext is therefore permitted for loopback ONLY. Arbitrary hosts stay on
+  the secure default, so this never weakens the app for anything but the
+  local server it is designed to talk to.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

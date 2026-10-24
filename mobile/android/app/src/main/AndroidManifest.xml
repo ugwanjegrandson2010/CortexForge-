@@ -1,7 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The app talks to the CortexForge server on the same device. This must
+         live in the main manifest: the debug/profile manifests are merged in
+         only for those build types, so without it a release build would have
+         no network access at all. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="cortexforge_mobile"
+        android:label="CortexForge"
         android:name="${applicationName}"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

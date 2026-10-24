@@ -1,4 +1,4 @@
-package com.cortexforge.cortexforge_mobile
+package com.cortexforge.cortexforge
 
 import io.flutter.embedding.android.FlutterActivity
 

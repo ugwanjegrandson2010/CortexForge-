@@ -44,11 +44,34 @@ Then, with Flutter installed:
 ```bash
 cd mobile
 flutter pub get
-flutter run                 # pick a device, or -d chrome for the web target
+flutter run                 # pick a device
 ```
 
 The app looks for the server at `http://127.0.0.1:8731` by default. To point it
 elsewhere, change the `baseUrl` passed to `CortexForgeApi` in `lib/main.dart`.
+
+### Building per platform
+
+| Platform | Command | Host required |
+|---|---|---|
+| Linux desktop | `flutter build linux` | Linux |
+| Android | `flutter build apk --release` | any (Android SDK) |
+| iOS | `flutter build ios --release --no-codesign` | **macOS + Xcode** |
+| iOS archive | `flutter build ipa --release` | **macOS + Xcode** |
+
+iOS builds are macOS-only by design — Flutter gates the `ios`, `ipa` and
+`swift-package` subcommands behind `platform.isMacOS`, so they do not exist at
+all on Linux or Windows. Nothing in the project configuration can change that;
+building or archiving for the App Store needs a Mac.
+
+Both platforms share the bundle ID `com.cortexforge.cortexforge`. iOS forbids
+underscores in bundle identifiers, so the ID avoids them — keep it identical
+across the two platforms.
+
+The client reaches the server over plain HTTP on loopback. Android gets a
+network security config permitting cleartext for `127.0.0.1`/`localhost` only;
+iOS gets the matching `NSAllowsLocalNetworking` exemption. Both are scoped to
+loopback so no other host is affected.
 
 ### Accounts vs local mode
 
